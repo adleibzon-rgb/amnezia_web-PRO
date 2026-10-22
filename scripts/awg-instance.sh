@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy / remove an AmneziaWG server instance from public images — no Amnezia app.
-# Variants: awg2 (AmneziaWG 2.0, awg-go 2.0.0), awg (classic, awg-go 0.2.18),
-#           legacy (kernel WireGuard, amnezia-wg).
+# Variants: awg31 (AmneziaWG 3.1), awg3 (3.0), awg2 (2.0, awg-go 2.0.0),
+#           awg (1.x for routers/old apps, awg-go 0.2.18), legacy (plain WireGuard, amnezia-wg).
 # Usage:
 #   awg-instance.sh create <variant> <port> [name]
 #   awg-instance.sh remove <name>
@@ -12,6 +12,9 @@ INSTANCES_DIR="${INSTANCES_DIR:-/opt/amnezia-instances}"
 IMG_AWG2="${IMG_AWG2:-amneziavpn/amneziawg-go:2.0.0}"
 IMG_AWG="${IMG_AWG:-amneziavpn/amneziawg-go:0.2.18}"
 IMG_LEGACY="${IMG_LEGACY:-amneziavpn/amnezia-wg:latest}"
+# 3.x pinned by digest: tags on Docker Hub get rewritten (tools inside differ from the tag name)
+IMG_AWG3="${IMG_AWG3:-amneziavpn/amneziawg-go:3.0.20260805@sha256:8447c91637c37536dd99b8bbd4420c819ac9f330f047804197291625bfb0ea8a}"
+IMG_AWG31="${IMG_AWG31:-amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72}"
 
 err() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -28,10 +31,12 @@ rand_magic() { # single large uint32 (AmneziaWG H header), NOT a range
 
 image_for() {
   case "$1" in
+    awg31)  echo "$IMG_AWG31" ;;
+    awg3)   echo "$IMG_AWG3" ;;
     awg2)   echo "$IMG_AWG2" ;;
     awg)    echo "$IMG_AWG" ;;
     legacy) echo "$IMG_LEGACY" ;;
-    *) err "unknown variant: $1 (awg2|awg|legacy)" ;;
+    *) err "unknown variant: $1 (awg31|awg3|awg2|awg|legacy)" ;;
   esac
 }
 
@@ -63,7 +68,8 @@ cmd_create() {
   [[ -n "$name" ]] || err "bad name"
   docker inspect "$name" >/dev/null 2>&1 && err "container $name already exists"
   # port free?
-  if ss -lun 2>/dev/null | grep -qE "[:.]${port}\b"; then err "udp port $port busy"; fi
+  # this script runs inside the panel container: its own `ss` does not see host ports, docker does
+  if docker ps --format '{{.Ports}}' | tr ',' '\n' | grep -qE ":${port}->[0-9]+/udp"; then err "udp port $port busy (другой контейнер)"; fi
 
   echo "→ pulling $img"
   docker pull -q "$img" >/dev/null
@@ -87,22 +93,37 @@ cmd_create() {
   {
     echo "[Interface]"
     echo "PrivateKey = $priv"
-    echo "Address = ${net}.0/24"
+    echo "Address = ${net}.1/24"
     echo "ListenPort = $port"
     if [[ "$variant" != "legacy" ]]; then
+      # 3.x header protection rejects junk sizes <= 12
+      local smin=15
       echo "Jc = $(rand_range 3 10)"
       echo "Jmin = 10"
       echo "Jmax = 50"
-      echo "S1 = $(rand_range 15 60)"
-      echo "S2 = $(rand_range 15 60)"
-      if [[ "$variant" == "awg2" ]]; then
-        echo "S3 = $(rand_range 5 40)"
-        echo "S4 = $(rand_range 1 40)"
+      echo "S1 = $(rand_range $smin 60)"
+      echo "S2 = $(rand_range $smin 60)"
+      if [[ "$variant" != "awg" ]]; then
+        echo "S3 = $(rand_range $smin 40)"
+        echo "S4 = $(rand_range $smin 40)"
       fi
       echo "H1 = $(rand_magic)"
       echo "H2 = $(rand_magic)"
       echo "H3 = $(rand_magic)"
       echo "H4 = $(rand_magic)"
+      if [[ "$variant" == awg3* ]]; then
+        echo "HeaderProtectionKey = $(docker run --rm "$img" awg genkey | tr -d '\r\n')"
+        echo "ContentPaddingAddition = 10-100"
+        echo "RekeyAfterTime = 100-120"
+        echo "RekeyTimeout = 3-7"
+        echo "RejectAfterTime = 150-180"
+        echo "KeepaliveTimeout = 5-15"
+        echo "MaxHandshakeAttempts = 15-20"
+      fi
+      if [[ "$variant" == "awg31" ]]; then
+        echo "RandomTrailers = on"
+        echo "DisableCookies = on"
+      fi
     fi
   } > "$conf"
 
@@ -114,6 +135,13 @@ cmd_create() {
   # start script run inside container
   local usimpl=""
   if [[ "$variant" != "legacy" ]]; then usimpl="export WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go"; fi
+  # 3.x is userspace-only: a loaded amneziawg kernel module (2.0 on the same host) does not know 3.x keys
+  if [[ "$variant" == awg3* ]]; then
+    usimpl="$usimpl"$'\n'"$(cat <<'PATCH'
+sed -i -e 's/if ! cmd ip link add "$INTERFACE" type amneziawg; then/if true; then/' -e 's|^\([[:space:]]*\)\[\[ -e /sys/module/amneziawg \]\].*|\1:|' /usr/bin/awg-quick
+PATCH
+)"
+  fi
   cat > "$dir/start.sh" <<EOF
 #!/bin/sh
 set +e
@@ -156,7 +184,7 @@ cmd_remove() {
 }
 
 cmd_list() {
-  docker ps --format '{{.Names}} {{.Ports}}' | grep -E '^amnezia-(awg2|awg|legacy)-|^amnezia-' || true
+  docker ps --format '{{.Names}} {{.Ports}}' | grep -E '^amnezia-' || true
 }
 
 case "${1:-}" in

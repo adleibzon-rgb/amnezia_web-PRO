@@ -161,7 +161,8 @@ if [[ -z "${AWG_PROFILES:-}" ]] && [[ -f "${AWG_PROFILE_SNAPSHOT}" ]]; then
   fi
 fi
 
-__awg_names="$(docker ps --format '{{.Names}}' 2>/dev/null | awk '/^amnezia-awg/ { print }' | sort || true)"
+# Контейнеры, развёрнутые самой панелью (/opt/amnezia-instances/<имя>), панель знает сама — в AWG_PROFILES их не кладём.
+__awg_names="$(docker ps --format '{{.Names}}' 2>/dev/null | awk '/^amnezia-awg/ { print }' | while read -r __n; do [[ -d "/opt/amnezia-instances/${__n}" ]] || echo "${__n}"; done | sort || true)"
 __awg_multi_count="$(printf '%s\n' "${__awg_names}" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
 __profile_container_count=0
 if [[ -n "${AWG_PROFILES:-}" ]]; then

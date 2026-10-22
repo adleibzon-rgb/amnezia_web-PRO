@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "child_process";
 import crypto from "crypto";
 import path from "path";
 import fs from "fs";
+import dns from "dns";
 import { fileURLToPath } from "url";
 import { healClientsMeta, readClientsMeta, writeClientsMeta } from "./scripts/clients-meta.mjs";
 
@@ -87,6 +88,7 @@ function parseProfilesFromEnv() {
     return [
       {
         id: "awg",
+        isDefault: true,
         label: process.env.AWG_PROFILE_LABEL || "AmneziaWG",
         container: process.env.AWG_CONTAINER || "amnezia-awg",
         confPath: process.env.AWG_CONF_PATH || "/opt/amnezia/awg/awg0.conf",
@@ -137,25 +139,36 @@ function parseProfilesFromEnv() {
 }
 
 const ENV_PROFILES = parseProfilesFromEnv();
+let defaultProfileMissing = false; // set by createRuntime when the default profile resolves to nothing
 
 const INSTANCES_DIR = process.env.INSTANCES_DIR || "/opt/amnezia-instances";
 const INSTANCES_FILE = `${process.env.DATA_DIR || "/data"}/instances.json`;
 const INSTANCE_SCRIPT = `${process.env.APP_DIR || "/app"}/scripts/awg-instance.sh`;
 
 const INSTANCE_VARIANTS = {
+  awg31: {
+    label: "AmneziaWG 3.1",
+    desc: "Новейшая версия: защита заголовков, случайные хвосты пакетов. Нужно свежее приложение Amnezia.",
+    iface: "awg0", binary: "awg",
+  },
+  awg3: {
+    label: "AmneziaWG 3.0",
+    desc: "Защита заголовков (HeaderProtectionKey), паддинг. Приложение Amnezia 4.8.x и новее.",
+    iface: "awg0", binary: "awg",
+  },
   awg2: {
     label: "AmneziaWG 2.0",
     desc: "Новая версия протокола на основе awg-go. Расширенная обфускация (S3, S4).",
     iface: "awg0", binary: "awg",
   },
   awg: {
-    label: "AmneziaWG",
-    desc: "Версия протокола на основе awg-go. Обфускация S1, S2.",
+    label: "AmneziaWG 1.x (роутеры)",
+    desc: "Обфускация Jc/S1/S2/H1–H4 без S3/S4 — для Keenetic, OpenWrt и старых приложений.",
     iface: "awg0", binary: "awg",
   },
   legacy: {
-    label: "AmneziaWG Legacy",
-    desc: "Оригинальная версия на ядре WireGuard. Совместима с клиентами старых версий.",
+    label: "WireGuard (Legacy)",
+    desc: "Чистый WireGuard без обфускации — любой WG-клиент и любые роутеры. Легко блокируется DPI.",
     iface: "wg0", binary: "wg",
   },
 };
@@ -219,10 +232,16 @@ function profileIdentityKey(p) {
 // Effective profile set = env profiles + managed instances (deduped by id and target files).
 function getProfiles() {
   const managed = loadManagedProfiles();
+  const managedContainers = new Set(managed.map((m) => m.container));
   const seenIds = new Set();
   const seenTargets = new Set();
   const out = [];
-  for (const p of [...ENV_PROFILES, ...managed]) {
+  // install.sh used to put panel-managed containers into AWG_PROFILES too: the env copy then
+  // shadowed the managed one (wrong id, no variant). Managed instance wins.
+  const envProfiles = ENV_PROFILES.filter((p) => !managedContainers.has(p.container));
+  // Default profile (no AWG_PROFILES) that found no container: hide it once the panel has its own instances.
+  const env = managed.length && defaultProfileMissing ? envProfiles.filter((p) => !p.isDefault) : envProfiles;
+  for (const p of [...env, ...managed]) {
     const id = String(p.id || "").trim();
     const target = profileIdentityKey(p);
     if ((id && seenIds.has(id)) || (target !== "|||" && seenTargets.has(target))) continue;
@@ -546,6 +565,30 @@ async function dockerRestartContainer(container) {
   throw new Error("Контейнер не ответил после restart");
 }
 
+// awg-quick brings up both AmneziaWG and plain WireGuard configs; old images only have wg-quick.
+const QUICK_SH = "$(command -v awg-quick || echo wg-quick)";
+
+/**
+ * Upstream for a real cascade: a client .conf of ANOTHER server (AWG or WG) becomes the "warp"
+ * interface of this instance. Routing of selected clients reuses the WARP machinery.
+ */
+function buildUpstreamConf(text) {
+  const sections = parseWireGuardSections(text);
+  const iface = sections.interface || {};
+  const peer = sections.peer || {};
+  if (!iface.PrivateKey || !peer.PublicKey || !peer.Endpoint) {
+    throw new Error("Нужен клиентский конфиг другого сервера: [Interface] с PrivateKey и [Peer] с PublicKey и Endpoint.");
+  }
+  const lines = ["[Interface]", `PrivateKey = ${iface.PrivateKey}`];
+  if (iface.Address) lines.push(`Address = ${String(iface.Address).split(",")[0].trim()}`);
+  for (const k of AWG_OBF_KEYS) if (iface[k]) lines.push(`${k} = ${iface[k]}`);
+  lines.push(`MTU = ${iface.MTU || 1280}`, "Table = off", "", "[Peer]", `PublicKey = ${peer.PublicKey}`);
+  if (peer.PresharedKey) lines.push(`PresharedKey = ${peer.PresharedKey}`);
+  lines.push("AllowedIPs = 0.0.0.0/0", `Endpoint = ${peer.Endpoint}`, "PersistentKeepalive = 25", "");
+  for (const l of lines) if (/['`$\\]/.test(l)) throw new Error("Недопустимые символы в конфиге.");
+  return lines.join("\n");
+}
+
 async function warpFileExists(rt, remotePath) {
   try {
     await execDocker(["exec", await rt.resolveContainer(), "test", "-f", remotePath]);
@@ -637,7 +680,7 @@ function buildWarpBootBlock(warpConf, ips) {
   return (
     "# --- WARP-MANAGER BEGIN ---\n\n" +
     `if [ -f '${warpConf}' ]; then\n` +
-    `  wg-quick up '${warpConf}' || true\n` +
+    `  ${QUICK_SH} up '${warpConf}' || true\n` +
     `  sleep 3\n` +
     `fi\n\n` +
     routing +
@@ -745,7 +788,7 @@ async function warpSummaryForRt(rt) {
   let wgShowWarp = "";
   if (installed && running) {
     try {
-      wgShowWarp = await rt.dockerExec("wg show warp 2>/dev/null || true");
+      wgShowWarp = await rt.dockerExec("awg show warp 2>/dev/null || wg show warp 2>/dev/null || true");
     } catch {
       wgShowWarp = "";
     }
@@ -800,7 +843,8 @@ async function containerHasFile(name, filePath) {
 // Lets the panel work even if AWG_CONTAINER points at the wrong name
 // (e.g. configured "amnezia-awg" but Amnezia created "amnezia-awg2").
 async function discoverAwgContainer(confPath, preferredName) {
-  const names = await listRunningContainerNames();
+  const managed = new Set(loadManagedProfiles().map((m) => m.container));
+  const names = (await listRunningContainerNames()).filter((n) => n === preferredName || !managed.has(n));
   const score = (n) => {
     if (preferredName && n === preferredName) return 0;
     if (/^amnezia-?awg/i.test(n)) return 1;
@@ -852,6 +896,7 @@ function createRuntime(profile) {
     if (profile.container) {
       for (const candidate of confCandidates) {
         if (await containerHasFile(profile.container, candidate)) {
+          if (profile.isDefault) defaultProfileMissing = false;
           resolvedContainer = profile.container;
           return resolvedContainer;
         }
@@ -862,6 +907,7 @@ function createRuntime(profile) {
       found = await discoverAwgContainer(candidate, profile.container);
       if (found) break;
     }
+    if (profile.isDefault) defaultProfileMissing = !found;
     if (found) {
       resolvedContainer = found;
       if (found !== profile.container) {
@@ -996,7 +1042,7 @@ function createRuntime(profile) {
     const activeIface = ifaceFromConfPath(activeConfPath, iface);
     const activeBinary = await resolveWgBinary();
     await dockerExec(
-      `wg-quick strip '${activeConfPath}' > /tmp/wg-admin-strip.conf && ${activeBinary} syncconf ${activeIface} /tmp/wg-admin-strip.conf`
+      `(awg-quick strip '${activeConfPath}' 2>/dev/null || wg-quick strip '${activeConfPath}') > /tmp/wg-admin-strip.conf && ${activeBinary} syncconf ${activeIface} /tmp/wg-admin-strip.conf`
     );
   }
 
@@ -1186,25 +1232,44 @@ function defaultPeerClientName(peer) {
   return ip ? `Клиент ${ip}` : `Peer ${String(peer?.publicKey || "").slice(0, 10)}…`;
 }
 
-/** Совпадает с defaults Amnezia Desktop (protocolConstants awg, desktop MTU). */
-const AWG_EXPORT_DEFAULTS = {
-  Jc: "3",
-  Jmin: "10",
-  Jmax: "30",
-  S1: "15",
-  S2: "18",
-  S3: "20",
-  S4: "23",
-  H1: "1020325451",
-  H2: "3288052141",
-  H3: "1766607858",
-  H4: "2528465083",
-  I1: "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>",
-  I2: "",
-  I3: "",
-  I4: "",
-  I5: "",
+
+// Client-side obfuscation keys, in the order Amnezia writes them. 3.x keys must match the server.
+const AWG_OBF_KEYS = [
+  "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5",
+  "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime",
+  "KeepaliveTimeout", "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies",
+];
+const AWG_OBF_ALIASES = {
+  Jc: ["junk_packet_count", "junkPacketCount"], Jmin: ["junk_packet_min_size", "junkPacketMinSize"],
+  Jmax: ["junk_packet_max_size", "junkPacketMaxSize"], S1: ["init_packet_junk_size", "initPacketJunkSize"],
+  S2: ["response_packet_junk_size", "responsePacketJunkSize"], S3: ["cookie_reply_packet_junk_size", "cookieReplyPacketJunkSize"],
+  S4: ["transport_packet_junk_size", "transportPacketJunkSize"], H1: ["init_packet_magic_header", "initPacketMagicHeader"],
+  H2: ["response_packet_magic_header", "responsePacketMagicHeader"], H3: ["underload_packet_magic_header", "underloadPacketMagicHeader"],
+  H4: ["transport_packet_magic_header", "transportPacketMagicHeader"],
+  I1: ["special_junk_1", "specialJunk1"], I2: ["special_junk_2", "specialJunk2"], I3: ["special_junk_3", "specialJunk3"],
+  I4: ["special_junk_4", "specialJunk4"], I5: ["special_junk_5", "specialJunk5"],
+  HeaderProtectionKey: ["header_protection_key"],
 };
+
+/**
+ * Obfuscation lines for a client .conf. The server [Interface] is the source of truth: a key the
+ * server does not have (e.g. S3/S4 on AWG 1.x) must not appear in the client, otherwise the
+ * handshake passes but data packets are dropped. Keys only in last_config (I1..I5 written by the
+ * Amnezia app) are kept. Returns "" for plain WireGuard servers.
+ */
+function awgObfuscationLines(lc, ifaceMap) {
+  if (!ifaceMap.Jc && !pickLc(lc, "Jc", "junk_packet_count", "junkPacketCount")) return "";
+  const lines = [];
+  for (const k of AWG_OBF_KEYS) {
+    const isServerKey = !/^I\d$/.test(k);
+    let v = isServerKey ? ifaceMap[k] : undefined;
+    if (v == null || String(v).trim() === "") v = pickLc(lc, k, ...(AWG_OBF_ALIASES[k] || []));
+    if (!isServerKey && (v == null || String(v).trim() === "")) v = ifaceMap[k];
+    if (isServerKey && ifaceMap.Jc && (ifaceMap[k] == null || ifaceMap[k] === "")) v = undefined;
+    if (v != null && String(v).trim() !== "") lines.push(`${k} = ${String(v).trim()}`);
+  }
+  return lines.length ? `${lines.join("\n")}\n` : "";
+}
 
 function parseLastConfigFromClientRow(row) {
   const ud = row?.userData;
@@ -1490,8 +1555,28 @@ function tunnelClientIpv4(peer, lc, row) {
   );
 }
 
+// Panel settings editable from the UI (domain for client Endpoint etc.).
+const SETTINGS_FILE = path.join(process.env.DATA_DIR || "/data", "settings.json");
+function loadPanelSettings() {
+  try {
+    const o = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+    return o && typeof o === "object" ? o : {};
+  } catch {
+    return {};
+  }
+}
+function savePanelSettings(next) {
+  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2));
+}
+/** Domain/IP set in the UI wins over CLIENT_CONFIG_ENDPOINT (installer puts the raw IP there). */
+function configuredEndpointHost() {
+  const ui = String(loadPanelSettings().endpointHost || "").trim();
+  return ui || process.env.CLIENT_CONFIG_ENDPOINT?.trim() || "";
+}
+
 function resolveExportEndpointHost(lc, req) {
-  const env = process.env.CLIENT_CONFIG_ENDPOINT?.trim();
+  const env = configuredEndpointHost();
   if (env) return env;
   const hn = pickLc(lc, "hostName", "hostname", "host");
   if (hn && String(hn).trim()) return String(hn).trim();
@@ -1546,70 +1631,11 @@ async function buildClientConfExport(rt, lc, ifaceMap, req, row, conf) {
   const mtuVal = pickLc(lc, "mtu", "MTU");
   const mtuLine = mtuVal ? `MTU = ${String(mtuVal).trim()}\n` : "";
 
-  if (activeBinary === "awg") {
-    const Jc = String(pickLc(lc, "Jc", "junk_packet_count", "junkPacketCount") ?? AWG_EXPORT_DEFAULTS.Jc);
-    const Jmin = String(pickLc(lc, "Jmin", "junk_packet_min_size", "junkPacketMinSize") ?? AWG_EXPORT_DEFAULTS.Jmin);
-    const Jmax = String(pickLc(lc, "Jmax", "junk_packet_max_size", "junkPacketMaxSize") ?? AWG_EXPORT_DEFAULTS.Jmax);
-    const S1 = String(pickLc(lc, "S1", "init_packet_junk_size", "initPacketJunkSize") ?? AWG_EXPORT_DEFAULTS.S1);
-    const S2 = String(pickLc(lc, "S2", "response_packet_junk_size", "responsePacketJunkSize") ?? AWG_EXPORT_DEFAULTS.S2);
-    const S3 = String(
-      pickLc(lc, "S3", "cookie_reply_packet_junk_size", "cookieReplyPacketJunkSize") ?? AWG_EXPORT_DEFAULTS.S3,
-    );
-    const S4 = String(
-      pickLc(lc, "S4", "transport_packet_junk_size", "transportPacketJunkSize") ?? AWG_EXPORT_DEFAULTS.S4,
-    );
-    const H1 = String(pickLc(lc, "H1", "init_packet_magic_header", "initPacketMagicHeader") ?? AWG_EXPORT_DEFAULTS.H1);
-    const H2 = String(
-      pickLc(lc, "H2", "response_packet_magic_header", "responsePacketMagicHeader") ?? AWG_EXPORT_DEFAULTS.H2,
-    );
-    const H3 = String(
-      pickLc(lc, "H3", "underload_packet_magic_header", "underloadPacketMagicHeader") ?? AWG_EXPORT_DEFAULTS.H3,
-    );
-    const H4 = String(
-      pickLc(lc, "H4", "transport_packet_magic_header", "transportPacketMagicHeader") ?? AWG_EXPORT_DEFAULTS.H4,
-    );
-    const I1 = String(pickLc(lc, "I1", "special_junk_1", "specialJunk1") ?? AWG_EXPORT_DEFAULTS.I1);
-    const I2 = String(pickLc(lc, "I2", "special_junk_2", "specialJunk2") ?? AWG_EXPORT_DEFAULTS.I2);
-    const I3 = String(pickLc(lc, "I3", "special_junk_3", "specialJunk3") ?? AWG_EXPORT_DEFAULTS.I3);
-    const I4 = String(pickLc(lc, "I4", "special_junk_4", "specialJunk4") ?? AWG_EXPORT_DEFAULTS.I4);
-    const I5 = String(pickLc(lc, "I5", "special_junk_5", "specialJunk5") ?? AWG_EXPORT_DEFAULTS.I5);
-    const iLines = [
-      ["I1", I1], ["I2", I2], ["I3", I3], ["I4", I4], ["I5", I5],
-    ]
-      .filter(([, v]) => String(v ?? "").trim() !== "")
-      .map(([k, v]) => `${k} = ${v}`)
-      .join("\n");
-    const iBlock = iLines ? `${iLines}\n` : "";
-
-    return `[Interface]
-Address = ${tunnelIp}/32
-DNS = ${dns1}, ${dns2}
-PrivateKey = ${priv.trim()}
-Jc = ${Jc}
-Jmin = ${Jmin}
-Jmax = ${Jmax}
-S1 = ${S1}
-S2 = ${S2}
-S3 = ${S3}
-S4 = ${S4}
-H1 = ${H1}
-H2 = ${H2}
-H3 = ${H3}
-H4 = ${H4}
-${iBlock}${mtuLine}[Peer]
-PublicKey = ${String(serverPub).trim()}
-PresharedKey = ${String(psk).trim()}
-AllowedIPs = ${peerAllowed}
-Endpoint = ${endpointHost}:${port}
-PersistentKeepalive = ${keepAlive}
-`;
-  }
-
   return `[Interface]
 Address = ${tunnelIp}/32
 DNS = ${dns1}, ${dns2}
 PrivateKey = ${priv.trim()}
-${mtuLine}[Peer]
+${awgObfuscationLines(lc, ifaceMap)}${mtuLine}[Peer]
 PublicKey = ${String(serverPub).trim()}
 PresharedKey = ${String(psk).trim()}
 AllowedIPs = ${peerAllowed}
@@ -1652,7 +1678,7 @@ async function awgGenKeypair(rt) {
 }
 
 function obfuscationFieldsFromServerHead(ifaceMap) {
-  const keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5"];
+  const keys = AWG_OBF_KEYS;
   const out = {};
   for (const k of keys) {
     const v = ifaceMap[k];
@@ -2427,6 +2453,40 @@ app.post("/api/change-password", requireAuth, (req, res) => {
   res.json({ ok: true, message: "Пароль изменён. Войдите снова." });
 });
 
+app.get("/api/settings", requireAuth, (_req, res) => {
+  const st = loadPanelSettings();
+  res.json({
+    endpointHost: st.endpointHost || "",
+    envEndpoint: process.env.CLIENT_CONFIG_ENDPOINT?.trim() || "",
+    effectiveEndpoint: configuredEndpointHost(),
+  });
+});
+
+app.post("/api/settings", requireAuth, requireProTier, async (req, res) => {
+  const raw = String(req.body?.endpointHost ?? "").trim();
+  let host = "";
+  if (raw) {
+    try {
+      host = assertCascadeEndpointHost(raw);
+    } catch (e) {
+      return res.status(400).json({ error: String(e.message || e) });
+    }
+    if (!/^[A-Za-z0-9.-]+$/.test(host) && !/^[0-9a-fA-F:]+$/.test(host)) {
+      return res.status(400).json({ error: "Домен или IP: только латиница, цифры, точки и дефисы." });
+    }
+  }
+  let resolved = null;
+  if (host && !/^[\d.]+$/.test(host) && host.includes(".")) {
+    try {
+      resolved = (await dns.promises.lookup(host, { all: true })).map((a) => a.address);
+    } catch {
+      return res.status(400).json({ error: `Домен ${host} не резолвится. Создайте A-запись на IP этого сервера и повторите.` });
+    }
+  }
+  savePanelSettings({ ...loadPanelSettings(), endpointHost: host });
+  res.json({ ok: true, endpointHost: host, resolved });
+});
+
 app.get("/api/protocols", requireAuth, (req, res) => {
   const rt = runtimeForRequest(req);
   const hintSingle =
@@ -2757,7 +2817,7 @@ app.post("/api/clients/create", requireAuth, requireProTier, async (req, res) =>
     }
     const tunnelIp = normalizeCascadeTunnelIp(conf, ifaceMap, req.body?.tunnelIp);
     const listenPort = ifaceMap.ListenPort ? Number(ifaceMap.ListenPort) : NaN;
-    const envHost = process.env.CLIENT_CONFIG_ENDPOINT?.trim();
+    const envHost = configuredEndpointHost();
     const hdrHost =
       typeof req.headers.host === "string" ? req.headers.host.split(":")[0].trim() : "";
     const endpointHost = envHost || (hdrHost && hdrHost !== "localhost" ? hdrHost : "");
@@ -2992,12 +3052,37 @@ app.post("/api/warp/start", requireAuth, requireProTier, async (req, res) => {
     });
   }
   try {
-    await rt.dockerExec(`wg-quick down '${rt.profile.warpConf}' 2>/dev/null || true`);
-    await rt.dockerExec(`wg-quick up '${rt.profile.warpConf}'`);
+    await rt.dockerExec(`${QUICK_SH} down '${rt.profile.warpConf}' 2>/dev/null || true`);
+    await rt.dockerExec(`${QUICK_SH} up '${rt.profile.warpConf}'`);
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/cascade/upstream", requireAuth, requireProTier, async (req, res) => {
+  if (UI_HIDDEN.warp || UI_HIDDEN.cascade) {
+    return res.status(403).json({ error: MSG_UI_CASCADE_OFF });
+  }
+  const rt = runtimeForRequest(req);
+  try {
+    const conf = buildUpstreamConf(String(req.body?.configText || ""));
+    await rt.backupRemoteFiles();
+    await rt.dockerExec(`mkdir -p '${rt.profile.warpDir}'`);
+    await rt.dockerExec(`${QUICK_SH} down '${rt.profile.warpConf}' 2>/dev/null || true`);
+    await rt.dockerWriteFile(rt.profile.warpConf, conf);
+    await rt.dockerExec(`chmod 600 '${rt.profile.warpConf}'`);
+    const up = await rt.dockerExec(`${QUICK_SH} up '${rt.profile.warpConf}' 2>&1`);
+    const selected = await warpLoadSelectedIps(rt);
+    await warpApplyRouting(rt, selected);
+    await warpPatchStartSh(rt, selected);
+    await new Promise((r) => setTimeout(r, 3000));
+    const show = await rt.dockerExec("awg show warp 2>/dev/null || wg show warp 2>/dev/null || true");
+    res.json({ ok: true, handshake: /latest handshake/.test(show), show: show.slice(0, 2000), output: up.slice(-1500) });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: String(e.message || e).slice(0, 1500) });
   }
 });
 
@@ -3010,7 +3095,7 @@ app.post("/api/warp/stop", requireAuth, requireProTier, async (req, res) => {
     return res.status(400).json({ error: "WARP не установлен." });
   }
   try {
-    await rt.dockerExec(`wg-quick down '${rt.profile.warpConf}' 2>/dev/null || true`);
+    await rt.dockerExec(`${QUICK_SH} down '${rt.profile.warpConf}' 2>/dev/null || true`);
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -3261,6 +3346,8 @@ function runInstanceScript(args) {
 }
 
 function detectVariantFromHead(head, iface) {
+  if (/^RandomTrailers\s*=/m.test(head)) return "awg31";
+  if (/^HeaderProtectionKey\s*=/m.test(head)) return "awg3";
   if (iface === "wg0" || !/^S1\s*=/m.test(head)) return "legacy";
   if (/^S3\s*=/m.test(head) || /^S4\s*=/m.test(head)) return "awg2";
   return "awg";
@@ -3269,6 +3356,8 @@ function detectVariantFromHead(head, iface) {
 function inferVariantFromProfile(prof) {
   const raw = `${prof.variant || ""} ${prof.id || ""} ${prof.container || ""} ${prof.label || ""}`.toLowerCase();
   if (raw.includes("legacy") || prof.iface === "wg0") return "legacy";
+  if (raw.includes("awg31") || raw.includes("3.1")) return "awg31";
+  if (raw.includes("awg3") || raw.includes("3.0")) return "awg3";
   if (raw.includes("awg2") || raw.includes("2.0")) return "awg2";
   return "awg";
 }

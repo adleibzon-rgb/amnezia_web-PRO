@@ -8,12 +8,38 @@
   --danger: #fb7185;
   --ok: #4ade80;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  --field: #0a0f16;
+  --text-soft: #cbd5f5;
+  --overlay: rgba(10, 15, 22, 0.92);
+  color-scheme: dark;
   font-family: "DM Sans", system-ui, sans-serif;
 }
 
 * {
   box-sizing: border-box;
 }
+
+/* Светлая тема: те же переменные, переключатель в шапке (localStorage "theme"). */
+html[data-theme="light"] {
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --line: rgba(15, 23, 42, 0.12);
+  --text: #0f172a;
+  --muted: #526077;
+  --accent: #0369a1;
+  --danger: #be123c;
+  --ok: #15803d;
+  --shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+  --field: #ffffff;
+  --text-soft: #1e293b;
+  --overlay: rgba(255, 255, 255, 0.94);
+  color-scheme: light;
+}
+html[data-theme="light"] .panel-promo-strip {
+  background: linear-gradient(90deg, #e0f2fe, #eef2ff);
+  border-bottom-color: rgba(3, 105, 161, 0.25);
+}
+html[data-theme="light"] .panel-promo-a { color: #92400e; }
 
 body.page {
   margin: 0;
@@ -123,7 +149,7 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 1rem;
-  background: #0c121b;
+  background: var(--field);
 }
 
 .token-box label {
@@ -191,7 +217,7 @@ h1 {
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #0a0f16;
+  background: var(--field);
   color: var(--text);
   font: inherit;
   margin-bottom: 0.75rem;
@@ -255,7 +281,7 @@ h1 {
   padding: 0.55rem 0.65rem;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #0a0f16;
+  background: var(--field);
   color: var(--text);
   font: inherit;
 }
@@ -265,7 +291,7 @@ h1 {
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #0a0f16;
+  background: var(--field);
   color: var(--text);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.85rem;
@@ -294,7 +320,7 @@ h1 {
   padding: 0.45rem 0.55rem;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #0a0f16;
+  background: var(--field);
   color: var(--text);
   font: inherit;
   font-size: 0.85rem;
@@ -407,7 +433,7 @@ h1 {
   padding: 0.45rem 0.55rem;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #0a0f16;
+  background: var(--field);
   color: var(--text);
   font: inherit;
   font-size: 0.85rem;
@@ -715,7 +741,7 @@ tr:last-child td {
 .ip {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.85rem;
-  color: #dbeafe;
+  color: var(--text-soft);
 }
 
 .badge {
@@ -736,7 +762,7 @@ tr:last-child td {
 
 .badge.off {
   border-color: rgba(148, 163, 184, 0.35);
-  color: #e2e8f0;
+  color: var(--text-soft);
   background: rgba(148, 163, 184, 0.06);
 }
 
@@ -833,11 +859,11 @@ tr:last-child td {
 .cascade-snippet {
   white-space: pre-wrap;
   word-break: break-word;
-  background: #0a0f16;
+  background: var(--field);
   border: 1px solid var(--line);
   padding: 0.75rem 0.95rem;
   border-radius: 12px;
-  color: #cbd5f5;
+  color: var(--text-soft);
   font-size: 0.78rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   margin: 0.5rem 0 0.85rem;
@@ -884,11 +910,11 @@ tr:last-child td {
 .raw pre {
   white-space: pre-wrap;
   word-break: break-word;
-  background: #0a0f16;
+  background: var(--field);
   border: 1px solid var(--line);
   padding: 0.75rem;
   border-radius: 12px;
-  color: #cbd5f5;
+  color: var(--text-soft);
   font-size: 0.78rem;
 }
 
@@ -927,7 +953,7 @@ tr:last-child td {
   padding: 0.55rem 0.65rem;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #0a0f16;
+  background: var(--field);
   color: var(--text);
   font: inherit;
 }
@@ -975,7 +1001,7 @@ tr:last-child td {
   margin-top: auto;
   padding: 1.25rem clamp(1rem, 3vw, 1.5rem) 1.5rem;
   border-top: 1px solid var(--line);
-  background: rgba(10, 15, 22, 0.92);
+  background: var(--overlay);
 }
 
 .support-line {
@@ -1227,3 +1253,12 @@ tr:last-child td {
 .instance-empty { padding: 12px; }
 
 .inst-src { font-size: 0.6rem; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; vertical-align: middle; }
+
+/* Светлая тема: пастельные надписи тёмной темы на белом не читаются */
+html[data-theme="light"] .clock-zone-diff--accent,
+html[data-theme="light"] .cascade-guide a,
+html[data-theme="light"] .cascade-guide a:hover { color: #0369a1; }
+html[data-theme="light"] .btn.warn { color: #9f1239; }
+html[data-theme="light"] .status.err { color: #b91c1c; }
+html[data-theme="light"] .badge.on { color: #166534; }
+html[data-theme="light"] body.page { background: var(--bg); }

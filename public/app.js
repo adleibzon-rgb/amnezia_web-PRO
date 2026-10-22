@@ -629,6 +629,7 @@ loginForm.addEventListener("submit", async (ev) => {
     await loadTimeSyncCaps();
     await loadClients();
     await loadInstances();
+    await loadSettings();
   } catch (e) {
     loginError.textContent = String(e.message || e);
   }
@@ -647,6 +648,7 @@ logoutBtn.addEventListener("click", async () => {
 refreshBtn.addEventListener("click", () => {
   loadClients();
   loadInstances();
+  loadSettings();
 });
 
 const cascadeForm = document.querySelector("#cascade-form");
@@ -1730,6 +1732,7 @@ async function boot() {
     await loadTimeSyncCaps();
     await loadClients();
     await loadInstances();
+    await loadSettings();
   } else {
     showLogin();
     loginPassword.focus();
@@ -1738,3 +1741,50 @@ async function boot() {
 
 initMtprotoLinkCopy();
 boot();
+
+// ── Тема, адрес сервера, вышестоящий сервер каскада ──
+document.querySelector("#theme-toggle")?.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch { /* private mode */ }
+});
+
+async function loadSettings() {
+  const input = document.querySelector("#settings-endpoint");
+  const hint = document.querySelector("#settings-hint");
+  if (!input) return;
+  try {
+    const st = await api("/api/settings");
+    input.value = st.endpointHost || "";
+    if (hint) hint.textContent = `Сейчас в конфигах клиентов: ${st.effectiveEndpoint || "адрес из браузера"}. Новый адрес действует на все выгрузки .conf, в том числе старых клиентов.`;
+  } catch { /* старый сервер без /api/settings */ }
+}
+
+document.querySelector("#settings-form")?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const endpointHost = document.querySelector("#settings-endpoint")?.value.trim() || "";
+  try {
+    const r = await api("/api/settings", { method: "POST", body: JSON.stringify({ endpointHost }) });
+    setStatus(r.resolved ? `Адрес сохранён: ${endpointHost} → ${r.resolved.join(", ")}` : "Адрес сохранён.", false);
+    await loadSettings();
+  } catch (e) {
+    setStatus(String(e.message || e), true);
+  }
+});
+
+document.querySelector("#upstream-form")?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const configText = document.querySelector("#upstream-conf")?.value || "";
+  const b = ev.target.querySelector("button[type=submit]");
+  if (b) b.disabled = true;
+  try {
+    setStatus("Подключаю вышестоящий сервер…", false);
+    const r = await api("/api/cascade/upstream", { method: "POST", body: JSON.stringify({ configText }) });
+    setStatus(r.handshake ? "Каскад подключён: рукопожатие есть. Отметьте клиентов ниже и нажмите «Применить»." : "Туннель поднят, но рукопожатия пока нет — проверьте Endpoint и UDP-порт вышестоящего сервера.", !r.handshake);
+    await loadClients();
+  } catch (e) {
+    setStatus(String(e.message || e), true);
+  } finally {
+    if (b) b.disabled = false;
+  }
+});

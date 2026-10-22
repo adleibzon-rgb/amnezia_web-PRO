@@ -7,7 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=1.2.28">
+  <script>try{var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark");document.documentElement.dataset.theme=t}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css?v=1.3.0">
 </head>
 <body class="page">
   <aside class="panel-promo-strip" role="complementary" aria-label="Поддержка и донат">
@@ -58,6 +59,7 @@
       </div>
       <div class="token-box">
         <div class="session-actions">
+          <button type="button" id="theme-toggle" class="btn ghost full" title="Светлая / тёмная тема">◐ Тема</button>
           <button type="button" id="logout" class="btn ghost full">Выйти</button>
         </div>
         <details class="pw-change">
@@ -121,7 +123,7 @@
       <summary class="fold-summary">
         <span class="fold-arrow" aria-hidden="true"></span>
         <span class="fold-titles">
-          <span class="fold-h">Cloudflare WARP</span>
+          <span class="fold-h">Cloudflare WARP / каскад</span>
           <span class="muted fold-meta" id="warp-status-line"></span>
         </span>
       </summary>
@@ -132,6 +134,11 @@
           Один раз на хосте VPS под root: в каталоге с репозиторием выполните <code class="inline">bash scripts/warp-amnezia.sh install</code>.
           Затем отметьте клиентов ниже и нажмите «Применить» (контейнер AWG перезапустится). Установить или удалить WARP с хоста можно кнопками ниже (пароль root по SSH — как при синхронизации времени). Убрать вручную: <code class="inline">bash scripts/warp-amnezia.sh uninstall</code> — см. README.
         </p>
+        <form id="upstream-form" class="cascade-form">
+          <label for="upstream-conf"><strong>Каскад через другой сервер</strong> — вставьте клиентский .conf (AmneziaWG или WireGuard) другого сервера. Он станет выходом вместо WARP: отмеченные ниже клиенты пойдут в интернет через тот сервер.</label>
+          <textarea id="upstream-conf" rows="6" placeholder="[Interface]&#10;PrivateKey = …&#10;[Peer]&#10;Endpoint = …" autocomplete="off"></textarea>
+          <button type="submit" class="btn primary">Подключить вышестоящий сервер</button>
+        </form>
         <div id="warp-actions" class="warp-actions"></div>
         <div id="warp-client-list" class="warp-client-list"></div>
         <details class="raw warp-raw">
@@ -198,8 +205,10 @@
             <label for="instance-variant">Протокол</label>
             <select id="instance-variant" class="form-select">
               <option value="awg2">AmneziaWG 2.0 (рекомендуется)</option>
-              <option value="awg">AmneziaWG</option>
-              <option value="legacy">AmneziaWG Legacy</option>
+              <option value="awg31">AmneziaWG 3.1 — новейший, свежее приложение Amnezia</option>
+              <option value="awg3">AmneziaWG 3.0</option>
+              <option value="awg">AmneziaWG 1.x — роутеры Keenetic/OpenWrt, старые приложения</option>
+              <option value="legacy">WireGuard (Legacy) — любой WG-клиент, без обфускации</option>
             </select>
           </div>
           <div class="instance-form-row">
@@ -208,7 +217,15 @@
           </div>
           <button type="submit" class="btn primary">＋ Развернуть инстанс</button>
         </form>
-        <p class="muted instance-hint">Создаёт серверный контейнер AmneziaWG из публичного образа, генерирует ключи и NAT. Затем в «Пользователях» выберите инстанс и создавайте клиентов.</p>
+        <p class="muted instance-hint">Создаёт серверный контейнер AmneziaWG из публичного образа, генерирует ключи и NAT. Затем в «Пользователях» выберите инстанс и создавайте клиентов. Можно держать несколько версий рядом на разных портах: 3.1/2.0 — для телефонов и ПК, 1.x или WireGuard — для роутеров. Не забудьте открыть UDP-порт в фаерволе хостинга.</p>
+        <form id="settings-form" class="instance-form">
+          <div class="instance-form-row">
+            <label for="settings-endpoint">Домен или IP сервера в конфигах клиентов</label>
+            <input id="settings-endpoint" type="text" placeholder="vpn.example.com — пусто: IP из установки" autocomplete="off">
+          </div>
+          <button type="submit" class="btn primary">Сохранить адрес</button>
+        </form>
+        <p id="settings-hint" class="muted instance-hint"></p>
       </div>
     </details>
 
@@ -406,6 +423,6 @@
     </div>
   </dialog>
 
-  <script src="/app.js?v=1.2.28" type="module"></script>
+  <script src="/app.js?v=1.3.0" type="module"></script>
 </body>
 </html>
