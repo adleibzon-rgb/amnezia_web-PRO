@@ -11,7 +11,7 @@
 | Заметки | Apple Notes → `МОИ ПРОЕКТЫ` → папка `amnezia_web-PRO` |
 | GitHub (публичный) | https://github.com/andrey271192/amnezia_web-PRO |
 | Ветка прода | `main` |
-| Тестовая копия рядом | `/Volumes/ssd/Мои проекты/Закрытые продукты/amnezia_web-PRO_test/` |
+| Старая закрытая панель (архив, не развивается) | `/Volumes/ssd/Мои проекты/Архив/amnezia_web-PRO_test/` |
 
 Путь `/Volumes/andrey/Мои проекты/...` из старого промпта синхронизации **не существует** —
 актуальная копия только на `/Volumes/ssd`.
