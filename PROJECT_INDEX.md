@@ -7,11 +7,11 @@
 
 | Что | Где |
 |---|---|
-| Папка проекта | `/Volumes/ssd/Мои проекты/amnezia_web-PRO/` |
+| Папка проекта | `/Volumes/ssd/Мои проекты/Открытые проекты/amnezia_web-PRO/` |
 | Заметки | Apple Notes → `МОИ ПРОЕКТЫ` → папка `amnezia_web-PRO` |
 | GitHub (публичный) | https://github.com/andrey271192/amnezia_web-PRO |
 | Ветка прода | `main` |
-| Тестовая копия рядом | `/Volumes/ssd/Мои проекты/amnezia_web-PRO_test/` |
+| Тестовая копия рядом | `/Volumes/ssd/Мои проекты/Закрытые продукты/amnezia_web-PRO_test/` |
 
 Путь `/Volumes/andrey/Мои проекты/...` из старого промпта синхронизации **не существует** —
 актуальная копия только на `/Volumes/ssd`.
@@ -65,4 +65,4 @@ curl -fsSL https://raw.githubusercontent.com/andrey271192/amnezia_web-PRO/main/s
 
 ## Состояние
 
-- HEAD `7b92bfb` (08.09.2026), совпадает с `origin/main`.
+- v1.3.0 (23.10.2026), тег и релиз на GitHub. Gitea — допушить (была недоступна).
