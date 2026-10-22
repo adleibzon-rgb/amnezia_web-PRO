@@ -2626,10 +2626,7 @@ app.post("/api/settings", requireAuth, async (req, res) => {
 
 app.get("/api/protocols", requireAuth, (req, res) => {
   const rt = runtimeForRequest(req);
-  const hintSingle =
-    getProfiles().length < 2
-      ? "Сейчас один инстанс: при установке не передали AWG_PROFILES или не восстановился снимок. Задайте JSON профилей и запустите install.sh — он сохранится в /root/amnezia-admin.awg-profiles.json."
-      : "";
+  const hintSingle = "";
   res.json({
     currentId: rt.profile.id,
     currentLabel: rt.profile.label,

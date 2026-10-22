@@ -21,8 +21,9 @@ need_root() {
 
 need_docker() {
   command -v docker >/dev/null 2>&1 || {
-    echo "Ошибка: нужен Docker."
-    exit 1
+    echo "→ Docker не найден — ставлю официальным скриптом get.docker.com..."
+    curl -fsSL https://get.docker.com | sh || { echo "Ошибка: не удалось поставить Docker."; exit 1; }
+    systemctl enable --now docker 2>/dev/null || true
   }
   docker info >/dev/null 2>&1 || {
     echo "Ошибка: демон Docker не отвечает."
