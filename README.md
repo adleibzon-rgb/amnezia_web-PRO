@@ -1,10 +1,11 @@
 # amnezia_web-PRO
 
-## Public PRO panel
+Полностью открытая веб-панель для сервера Amnezia: все функции бесплатны, без платных или закрытых редакций. Один репозиторий, один установщик.
 
-**amnezia_web-PRO** — public full Amnezia Web panel. One repository, one installer, no private download flow and no separate deploy repository.
+## Что нового в 1.4.0
 
-Base project **[amnezia_web](https://github.com/andrey271192/amnezia_web)** remains a lighter open panel. This repository contains the full PRO feature set by default.
+- **Xray VLESS‑Reality** — раздел «Xray VLESS‑Reality»: установка с выбором TCP‑порта и сайта‑маскировки, клиенты (создать, выключить/включить, удалить), ссылка `vless://` для Amnezia VPN, v2rayNG, Hiddify, Streisand, Happ. Файлы в `/opt/amnezia/xray` в том же формате, что у приложения Amnezia.
+- **Всё открыто:** убрана редакция «community / только просмотр» и переменные `AMNEZIA_EDITION`, `COMMUNITY_UPGRADE_*` — все функции доступны всем.
 
 ## Что нового в 1.3.0
 
@@ -261,7 +262,7 @@ UI_HIDE_SECTIONS=warp,cascade curl -fsSL https://raw.githubusercontent.com/andre
 
 Что нужно человеку, который ставит связку:
 
-1. На **этом** (основном) VPS — обычный AmneziaWG и панель PRO; здесь блок **«Новый клиент под каскад»** **создаёт peer и ключи** и выдаёт скачанный **`.conf`**, в котором **Endpoint** уже указывает на промежуточную машину.
+1. На **этом** (основном) VPS — обычный AmneziaWG и эта панель; здесь блок **«Новый клиент под каскад»** **создаёт peer и ключи** и выдаёт скачанный **`.conf`**, в котором **Endpoint** уже указывает на промежуточную машину.
 2. На **промежуточном** сервере нужен **проброс порта DNAT до основного VPS** на тот же **ListenPort**, что слушает туннель здесь (либо свой внешний порт → тогда его указывают в форме как «Порт Endpoint»).
 
 Готовая панель для правил проброса (iptables DNAT NAT «под ключ»): репозиторий **[andrey271192/kaskad_web_vpn](https://github.com/andrey271192/kaskad_web_vpn)** — установка `curl … install.sh | sudo bash`, затем вход в браузере на промежуточный VPS по порту из README (например `8088/setup`) и настройка правила «вход → IP основного VPS:порт WG». Подробные шаги и переменные среды см. там же в README.

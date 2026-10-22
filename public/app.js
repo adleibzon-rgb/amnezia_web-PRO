@@ -74,77 +74,6 @@ let warpSshPendingCmd = null;
 /** Какие панели скрыты настройкой сервера (`UI_HIDE_SECTIONS`). */
 let uiHidden = { users: false, warp: false, cascade: false, mtproto: false };
 
-const editionBanner = document.querySelector("#edition-banner");
-const DEFAULT_HEADER_SUB = document.querySelector(".top .sub")?.textContent?.trim() || "";
-
-/** Состояние редакции панели (community = только просмотр клиентов). */
-let editionState = {
-  tier: "pro",
-  readOnlyClients: false,
-  upgradeUrl: null,
-  upgradePitch: null,
-  showDebugWg: true,
-};
-
-function applyEditionPayload(data) {
-  const ed = data?.edition;
-  if (!ed || typeof ed !== "object") return;
-  editionState = {
-    tier: ed.tier === "community" ? "community" : "pro",
-    readOnlyClients: Boolean(ed.readOnlyClients),
-    upgradeUrl: typeof ed.upgradeUrl === "string" ? ed.upgradeUrl : null,
-    upgradePitch: typeof ed.upgradePitch === "string" ? ed.upgradePitch : null,
-    showDebugWg: ed.showDebugWg !== false,
-  };
-  const titleEl = document.querySelector(".top h1");
-  if (titleEl) {
-    titleEl.textContent =
-      editionState.tier === "community"
-        ? "Пользователи AmneziaWG FREE"
-        : "Пользователи AmneziaWG PRO";
-  }
-  const subEl = document.querySelector(".top .sub");
-  if (subEl) {
-    if (editionState.tier === "community") {
-      subEl.textContent =
-        "Базовая панель amnezia_web: только просмотр клиентов AmneziaWG и статусов. Управление туннелем, экспорт .conf, каскад, Cloudflare WARP, MTProto‑прокси Telegram и синхронизация времени хоста — в версии PRO.";
-    } else {
-      subEl.textContent = DEFAULT_HEADER_SUB;
-    }
-  }
-  if (editionBanner) {
-    if (editionState.tier === "community") {
-      editionBanner.classList.remove("hidden");
-      editionBanner.innerHTML = "";
-      const wrap = document.createElement("div");
-      wrap.className = "edition-banner-inner";
-      const textCol = document.createElement("div");
-      textCol.className = "edition-banner-text";
-      const strong = document.createElement("strong");
-      strong.textContent = "Базовая версия · только просмотр";
-      const pitch = document.createElement("p");
-      pitch.className = "edition-banner-pitch muted";
-      pitch.textContent = editionState.upgradePitch || "";
-      textCol.append(strong, pitch);
-      const cta = document.createElement("a");
-      cta.className = "btn small primary edition-banner-cta";
-      cta.rel = "noopener noreferrer";
-      cta.target = "_blank";
-      cta.href =
-        editionState.upgradeUrl ||
-        "https://github.com/andrey271192/amnezia_web-PRO";
-      cta.textContent = "Открыть PRO на GitHub";
-      wrap.append(textCol, cta);
-      editionBanner.appendChild(wrap);
-    } else {
-      editionBanner.classList.add("hidden");
-      editionBanner.innerHTML = "";
-    }
-  }
-  document.querySelector(".clock-host-sync")?.classList.toggle("hidden", editionState.readOnlyClients);
-  if (wgRawDetails) wgRawDetails.hidden = uiHidden.users || !editionState.showDebugWg;
-}
-
 /** @param {string} [tgLink] */
 function setMtprotoLinkCard(tgLink) {
   const t = typeof tgLink === "string" ? tgLink.trim() : "";
@@ -350,7 +279,7 @@ function applyUiHiddenFromPayload(data) {
     };
   }
   if (usersPanel) usersPanel.hidden = uiHidden.users;
-  if (wgRawDetails) wgRawDetails.hidden = uiHidden.users || !editionState.showDebugWg;
+  if (wgRawDetails) wgRawDetails.hidden = uiHidden.users;
   if (cascadePanel) cascadePanel.hidden = uiHidden.cascade;
   if (warpPanel) warpPanel.hidden = uiHidden.warp;
   if (mtprotoPanel) mtprotoPanel.hidden = uiHidden.mtproto;
@@ -586,7 +515,6 @@ async function checkSession() {
 async function loadProtocols() {
   try {
     const data = await api("/api/protocols");
-    applyEditionPayload(data);
     protoLabel.textContent = `Протокол: ${data.currentLabel || "AmneziaWG"}`;
     if (profileHintEl) {
       if (data.singleProfile && typeof data.profilesPersistHint === "string" && data.profilesPersistHint) {
@@ -630,6 +558,7 @@ loginForm.addEventListener("submit", async (ev) => {
     await loadClients();
     await loadInstances();
     await loadSettings();
+    await loadXray();
   } catch (e) {
     loginError.textContent = String(e.message || e);
   }
@@ -649,6 +578,7 @@ refreshBtn.addEventListener("click", () => {
   loadClients();
   loadInstances();
   loadSettings();
+  loadXray();
 });
 
 const cascadeForm = document.querySelector("#cascade-form");
@@ -838,14 +768,6 @@ async function loadTimeSyncCaps() {
   const btn = document.querySelector("#sync-host-time");
   try {
     const c = await api("/api/time-sync-capabilities");
-    if (editionState.readOnlyClients || c.communityBlocked) {
-      if (hint) {
-        hint.textContent =
-          "В базовой версии синхронизация времени хоста по SSH недоступна — это функция PRO.";
-      }
-      if (btn) btn.disabled = true;
-      return;
-    }
     if (hint) {
       hint.textContent = c.hostTimeSync
         ? `Записывается UTC-момент с этого устройства на хост по SSH (root@${c.sshHost}). Пояс строки «Сервер»: ${c.serverClockTimeZone}. Пароль не сохраняется.`
@@ -938,38 +860,27 @@ function renderRows(clients) {
     nameWrap.className = "name-cell";
     const strong = document.createElement("strong");
     strong.textContent = c.name;
-    if (!editionState.readOnlyClients) {
-      const renameWrap = document.createElement("div");
-      renameWrap.className = "rename-inline";
-      renameWrap.appendChild(
-        btn("Переименовать", "btn small ghost", () => void renameClient(c))
-      );
-      nameWrap.append(strong, renameWrap);
-      if (!c.exportAvailable) {
-        const hintFold = document.createElement("details");
-        hintFold.className = "hint-mini";
-        const sum = document.createElement("summary");
-        sum.textContent = c.missingClientTable
-          ? "Peer найден в конфиге, но нет записи clientsTable"
-          : "Нет готового .conf на сервере (last_config)";
-        hintFold.appendChild(sum);
-        const exHint = document.createElement("p");
-        exHint.className = "muted export-missing-hint";
-        exHint.textContent = c.missingClientTable
-          ? "Клиент активен в awg0.conf, но веб не знает имя и last_config. Вставьте его .conf в блок «Импорт клиента», чтобы восстановить запись и экспорт."
-          : "Конфиг с сервера недоступен (нет last_config). Создайте клиента с нужным Endpoint в блоке «Новый клиент под каскад» ниже или возьмите ключ из приложения Amnezia.";
-        hintFold.appendChild(exHint);
-        nameWrap.appendChild(hintFold);
-      }
-    } else {
-      nameWrap.appendChild(strong);
-      const roHint = document.createElement("p");
-      roHint.className = "muted hint-mini";
-      roHint.style.margin = "0.35rem 0 0";
-      roHint.textContent = c.exportAvailable
-        ? "На сервере есть данные для .conf — скачивание доступно в PRO."
-        : "Нет last_config на сервере — полный конфиг в приложении Amnezia.";
-      nameWrap.appendChild(roHint);
+    const renameWrap = document.createElement("div");
+    renameWrap.className = "rename-inline";
+    renameWrap.appendChild(
+      btn("Переименовать", "btn small ghost", () => void renameClient(c))
+    );
+    nameWrap.append(strong, renameWrap);
+    if (!c.exportAvailable) {
+      const hintFold = document.createElement("details");
+      hintFold.className = "hint-mini";
+      const sum = document.createElement("summary");
+      sum.textContent = c.missingClientTable
+        ? "Peer найден в конфиге, но нет записи clientsTable"
+        : "Нет готового .conf на сервере (last_config)";
+      hintFold.appendChild(sum);
+      const exHint = document.createElement("p");
+      exHint.className = "muted export-missing-hint";
+      exHint.textContent = c.missingClientTable
+        ? "Клиент активен в awg0.conf, но веб не знает имя и last_config. Вставьте его .conf в блок «Импорт клиента», чтобы восстановить запись и экспорт."
+        : "Конфиг с сервера недоступен (нет last_config). Создайте клиента с нужным Endpoint в блоке «Новый клиент под каскад» ниже или возьмите ключ из приложения Amnezia.";
+      hintFold.appendChild(exHint);
+      nameWrap.appendChild(hintFold);
     }
     nameTd.appendChild(nameWrap);
 
@@ -991,51 +902,42 @@ function renderRows(clients) {
     const dateLine = document.createElement("div");
     dateLine.textContent = formatLastDisconnect(c);
     offTd.appendChild(dateLine);
-    if (!editionState.readOnlyClients) {
-      const dtWrap = document.createElement("div");
-      dtWrap.className = "rename-inline";
-      dtWrap.appendChild(
-        btn("Задать дату", "btn small ghost", () => openEditDisconnectDialog(c))
-      );
-      offTd.appendChild(dtWrap);
-    }
+    const dtWrap = document.createElement("div");
+    dtWrap.className = "rename-inline";
+    dtWrap.appendChild(
+      btn("Задать дату", "btn small ghost", () => openEditDisconnectDialog(c))
+    );
+    offTd.appendChild(dtWrap);
 
     const actTd = document.createElement("td");
     actTd.className = "actions";
 
-    if (editionState.readOnlyClients) {
-      const lock = document.createElement("span");
-      lock.className = "muted";
-      lock.textContent = "Только PRO";
-      actTd.appendChild(lock);
+    if (c.activeInConf) {
+      actTd.appendChild(iconBtn("⏻", "Выключить", "btn small ghost icon", () => openDisableDialog(c)));
     } else {
-      if (c.activeInConf) {
-        actTd.appendChild(iconBtn("⏻", "Выключить", "btn small ghost icon", () => openDisableDialog(c)));
-      } else {
-        actTd.appendChild(
-          iconBtn("▶", "Включить", "btn small primary icon", () => mutate("/api/clients/enable", c.clientId))
-        );
-      }
-      if (c.exportAvailable) {
-        const direct = document.createElement("a");
-        direct.className = "btn small ghost";
-        direct.href = clientExportGetUrl(c.clientId);
-        direct.textContent = "🔗"; direct.classList.add("icon");
-        direct.rel = "noopener";
-        direct.title =
-          "Открыть в новой вкладке — скачается .conf, если вы авторизованы в этой панели (cookies).";
-
-        actTd.appendChild(iconBtn("⬇", "Скачать .conf", "btn small ghost icon", () => void downloadClientConfig(c)));
-        actTd.appendChild(direct);
-        actTd.appendChild(
-          iconBtn("⧉", "Копировать URL", "btn small ghost icon", async () => {
-            const ok = await copyTextToClipboard(clientExportGetUrl(c.clientId));
-            setStatus(ok ? "Ссылка скопирована (вставьте в браузер, будучи залогиненным)." : "Не удалось скопировать.", !ok);
-          }),
-        );
-      }
-      actTd.appendChild(iconBtn("🗑", "Удалить", "btn small warn icon", () => confirmDelete(c.name, c.clientId)));
+      actTd.appendChild(
+        iconBtn("▶", "Включить", "btn small primary icon", () => mutate("/api/clients/enable", c.clientId))
+      );
     }
+    if (c.exportAvailable) {
+      const direct = document.createElement("a");
+      direct.className = "btn small ghost";
+      direct.href = clientExportGetUrl(c.clientId);
+      direct.textContent = "🔗"; direct.classList.add("icon");
+      direct.rel = "noopener";
+      direct.title =
+        "Открыть в новой вкладке — скачается .conf, если вы авторизованы в этой панели (cookies).";
+
+      actTd.appendChild(iconBtn("⬇", "Скачать .conf", "btn small ghost icon", () => void downloadClientConfig(c)));
+      actTd.appendChild(direct);
+      actTd.appendChild(
+        iconBtn("⧉", "Копировать URL", "btn small ghost icon", async () => {
+          const ok = await copyTextToClipboard(clientExportGetUrl(c.clientId));
+          setStatus(ok ? "Ссылка скопирована (вставьте в браузер, будучи залогиненным)." : "Не удалось скопировать.", !ok);
+        }),
+      );
+    }
+    actTd.appendChild(iconBtn("🗑", "Удалить", "btn small warn icon", () => confirmDelete(c.name, c.clientId)));
 
     tr.append(nameTd, ipTd, stTd, offTd, actTd);
     rowsEl.appendChild(tr);
@@ -1651,7 +1553,6 @@ async function loadClients() {
   try {
     setStatus("Загрузка…", false);
     const data = await api(`/api/clients${currentProfileQueryString()}`);
-    applyEditionPayload(data);
     applyUiHiddenFromPayload(data);
     const pref = data.profileLabel ? `${data.profileLabel} · ` : "";
     if (uiHidden.users) {
@@ -1661,10 +1562,7 @@ async function loadClients() {
     } else {
       if (syncPeersBtn) {
         syncPeersBtn.hidden = false;
-        syncPeersBtn.disabled = editionState.readOnlyClients;
-        syncPeersBtn.title = editionState.readOnlyClients
-          ? "Доступно в PRO"
-          : "Создать недостающие строки clientsTable из активных [Peer] текущего инстанса";
+        syncPeersBtn.title = "Создать недостающие строки clientsTable из активных [Peer] текущего инстанса";
       }
       peerCountEl.textContent = `${pref}${data.clients.length} в таблице · ${data.peerCount} peer`;
       wgShowEl.textContent = data.wgShow || "";
@@ -1733,6 +1631,7 @@ async function boot() {
     await loadClients();
     await loadInstances();
     await loadSettings();
+    await loadXray();
   } else {
     showLogin();
     loginPassword.focus();
@@ -1786,5 +1685,102 @@ document.querySelector("#upstream-form")?.addEventListener("submit", async (ev) 
     setStatus(String(e.message || e), true);
   } finally {
     if (b) b.disabled = false;
+  }
+});
+
+async function loadXray() {
+  const line = document.querySelector("#xray-status-line");
+  try {
+    const x = await api("/api/xray/status");
+    document.querySelector("#xray-install-form").style.display = x.installed ? "none" : "";
+    document.querySelector("#xray-manage").style.display = x.installed ? "" : "none";
+    if (line) {
+      line.textContent = !x.installed
+        ? "не установлен"
+        : x.running
+          ? `порт ${x.port} · ${x.sni} · клиентов: ${x.clients.length}`
+          : "контейнер остановлен";
+    }
+    if (x.error) setStatus(x.error, true);
+    const rows = document.querySelector("#xray-rows");
+    rows.innerHTML = "";
+    for (const c of x.clients) {
+      const tr = document.createElement("tr");
+      const nameTd = document.createElement("td");
+      nameTd.innerHTML = `<strong>${escapeHtml(c.name)}</strong>`;
+      const stTd = document.createElement("td");
+      stTd.innerHTML = `<span class="badge ${c.enabled ? "on" : "off"}">${c.enabled ? "Включён" : "Выключен"}</span>`;
+      const actTd = document.createElement("td");
+      actTd.className = "actions";
+      const act = (action) => async () => {
+        if (action === "delete" && !confirm(`Удалить клиента ${c.name}?`)) return;
+        try {
+          await api("/api/xray/clients/update", { method: "POST", body: JSON.stringify({ id: c.id, action }) });
+          await loadXray();
+        } catch (e) {
+          setStatus(String(e.message || e), true);
+        }
+      };
+      actTd.append(
+        iconBtn("⧉", "Копировать ссылку vless://", "btn small ghost icon", async () => {
+          const ok = await copyTextToClipboard(c.link);
+          setStatus(ok ? `Ссылка ${c.name} скопирована.` : "Не удалось скопировать.", !ok);
+        }),
+        c.enabled
+          ? iconBtn("⏻", "Выключить", "btn small ghost icon", act("disable"))
+          : iconBtn("▶", "Включить", "btn small primary icon", act("enable")),
+        iconBtn("🗑", "Удалить", "btn small warn icon", act("delete")),
+      );
+      tr.append(nameTd, stTd, actTd);
+      rows.appendChild(tr);
+    }
+  } catch (e) {
+    if (line) line.textContent = String(e.message || e);
+  }
+}
+
+document.querySelector("#xray-install-form")?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const b = ev.target.querySelector("button[type=submit]");
+  if (b) b.disabled = true;
+  try {
+    setStatus("Ставлю Xray (сборка образа ~1 мин)…", false);
+    await api("/api/xray/install", {
+      method: "POST",
+      body: JSON.stringify({
+        port: document.querySelector("#xray-port").value,
+        sni: document.querySelector("#xray-sni").value,
+      }),
+    });
+    setStatus("Xray установлен. Создайте клиента.", false);
+    await loadXray();
+  } catch (e) {
+    setStatus(String(e.message || e), true);
+  } finally {
+    if (b) b.disabled = false;
+  }
+});
+
+document.querySelector("#xray-client-form")?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const input = document.querySelector("#xray-client-name");
+  try {
+    const r = await api("/api/xray/clients/create", { method: "POST", body: JSON.stringify({ name: input.value }) });
+    input.value = "";
+    const ok = await copyTextToClipboard(r.link);
+    setStatus(ok ? "Клиент создан, ссылка скопирована." : "Клиент создан.", false);
+    await loadXray();
+  } catch (e) {
+    setStatus(String(e.message || e), true);
+  }
+});
+
+document.querySelector("#xray-remove")?.addEventListener("click", async () => {
+  if (!confirm("Удалить контейнер Xray? Клиенты Xray перестанут работать.")) return;
+  try {
+    await api("/api/xray/remove", { method: "POST", body: "{}" });
+    await loadXray();
+  } catch (e) {
+    setStatus(String(e.message || e), true);
   }
 });

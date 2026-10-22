@@ -51,36 +51,6 @@ function resolveUiHidden() {
 
 const UI_HIDDEN = resolveUiHidden();
 
-const AMNEZIA_EDITION = (process.env.AMNEZIA_EDITION || "pro").trim().toLowerCase();
-const IS_COMMUNITY = AMNEZIA_EDITION === "community";
-const COMMUNITY_UPGRADE_URL =
-  process.env.COMMUNITY_UPGRADE_URL?.trim() ||
-  "https://github.com/andrey271192/amnezia_web-PRO";
-const COMMUNITY_UPGRADE_PITCH =
-  process.env.COMMUNITY_UPGRADE_PITCH?.trim() ||
-  "В PRO: вкл/выкл клиентов, даты и расписание отключений, переименование, удаление, экспорт .conf, каскад, Cloudflare WARP, синхронизация времени хоста. Полная сборка открыта в публичном репозитории amnezia_web-PRO.";
-
-function editionPayload() {
-  return {
-    tier: IS_COMMUNITY ? "community" : "pro",
-    readOnlyClients: IS_COMMUNITY,
-    upgradeUrl: IS_COMMUNITY ? COMMUNITY_UPGRADE_URL : null,
-    upgradePitch: IS_COMMUNITY ? COMMUNITY_UPGRADE_PITCH : null,
-    showDebugWg: !IS_COMMUNITY,
-  };
-}
-
-function effectiveUiHidden() {
-  if (!IS_COMMUNITY) return { ...UI_HIDDEN };
-  return {
-    users: UI_HIDDEN.users,
-    warp: true,
-    cascade: true,
-    mtproto: UI_HIDDEN.mtproto,
-  };
-}
-
-
 function parseProfilesFromEnv() {
   const raw = process.env.AWG_PROFILES?.trim();
   const fallback = () => {
@@ -455,23 +425,6 @@ function requireAuthOrExportToken(req, res, next) {
     return;
   }
   requireAuth(req, res, next);
-}
-
-function rejectCommunityProOnly(res) {
-  res.status(403).json({
-    error:
-      "Доступно в версии PRO: управление клиентами, экспорт .conf, каскад, Cloudflare WARP и синхронизация времени хоста.",
-    upgradeRequired: true,
-    upgradeUrl: COMMUNITY_UPGRADE_URL,
-  });
-}
-
-function requireProTier(_req, res, next) {
-  if (!IS_COMMUNITY) {
-    next();
-    return;
-  }
-  rejectCommunityProOnly(res);
 }
 
 function runtimeFromExportRequest(req) {
@@ -2106,9 +2059,6 @@ if (UI_HIDDEN.users || UI_HIDDEN.warp || UI_HIDDEN.cascade || UI_HIDDEN.mtproto)
     `UI_HIDDEN: users=${UI_HIDDEN.users} warp=${UI_HIDDEN.warp} cascade=${UI_HIDDEN.cascade} mtproto=${UI_HIDDEN.mtproto}`,
   );
 }
-if (IS_COMMUNITY) {
-  console.warn(`Редакция community (только просмотр клиентов). PRO: ${COMMUNITY_UPGRADE_URL}`);
-}
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => {
@@ -2154,15 +2104,6 @@ app.get("/api/server-time", requireAuth, (req, res) => {
 });
 
 app.get("/api/time-sync-capabilities", requireAuth, (_req, res) => {
-  if (IS_COMMUNITY) {
-    res.json({
-      hostTimeSync: false,
-      sshHost: process.env.TIME_SYNC_SSH_HOST?.trim() || "172.17.0.1",
-      serverClockTimeZone: resolveServerClockTimeZone(),
-      communityBlocked: true,
-    });
-    return;
-  }
   res.json({
     hostTimeSync: hostTimeSyncConfigured(),
     sshHost: process.env.TIME_SYNC_SSH_HOST?.trim() || "172.17.0.1",
@@ -2180,7 +2121,7 @@ function mtprotoLogsTailPayload(req) {
 }
 
 app.get("/api/mtproto/status", requireAuth, (req, res) => {
-  if (effectiveUiHidden().mtproto) {
+  if (UI_HIDDEN.mtproto) {
     return res.status(403).json({ error: MSG_UI_MTProto_OFF });
   }
   const snap = mtprotoSnapshot(hostFromRequest(req));
@@ -2196,21 +2137,21 @@ app.get("/api/mtproto/status", requireAuth, (req, res) => {
 });
 
 app.get("/api/mtproto/logs", requireAuth, (req, res) => {
-  if (effectiveUiHidden().mtproto) {
+  if (UI_HIDDEN.mtproto) {
     return res.status(403).json({ error: MSG_UI_MTProto_OFF });
   }
   res.json(mtprotoLogsTailPayload(req));
 });
 
 app.get("/api/mtproto/tail", requireAuth, (req, res) => {
-  if (effectiveUiHidden().mtproto) {
+  if (UI_HIDDEN.mtproto) {
     return res.status(403).json({ error: MSG_UI_MTProto_OFF });
   }
   res.json(mtprotoLogsTailPayload(req));
 });
 
 app.post("/api/mtproto/install", requireAuth, (req, res) => {
-  if (effectiveUiHidden().mtproto) {
+  if (UI_HIDDEN.mtproto) {
     return res.status(403).json({ error: MSG_UI_MTProto_OFF });
   }
   if (!/^[a-zA-Z][a-zA-Z0-9_.-]*$/.test(MTPRO_CONTAINER)) {
@@ -2306,7 +2247,7 @@ app.post("/api/mtproto/install", requireAuth, (req, res) => {
 });
 
 app.post("/api/mtproto/remove", requireAuth, (_req, res) => {
-  if (effectiveUiHidden().mtproto) {
+  if (UI_HIDDEN.mtproto) {
     return res.status(403).json({ error: MSG_UI_MTProto_OFF });
   }
   const r = dockerSpawnSync(["rm", "-f", MTPRO_CONTAINER], 120_000);
@@ -2320,7 +2261,7 @@ app.post("/api/mtproto/remove", requireAuth, (_req, res) => {
 });
 
 app.post("/api/mtproto/restart", requireAuth, (_req, res) => {
-  if (effectiveUiHidden().mtproto) {
+  if (UI_HIDDEN.mtproto) {
     return res.status(403).json({ error: MSG_UI_MTProto_OFF });
   }
   const snap = mtprotoSnapshot();
@@ -2335,7 +2276,7 @@ app.post("/api/mtproto/restart", requireAuth, (_req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/sync-host-time", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/sync-host-time", requireAuth, async (req, res) => {
   if (!hostTimeSyncConfigured()) {
     return res.status(503).json({
       error:
@@ -2367,7 +2308,7 @@ app.post("/api/sync-host-time", requireAuth, requireProTier, async (req, res) =>
   }
 });
 
-app.post("/api/warp/host-setup", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/warp/host-setup", requireAuth, async (req, res) => {
   if (UI_HIDDEN.warp) {
     return res.status(403).json({ error: MSG_UI_WARP_OFF });
   }
@@ -2408,6 +2349,202 @@ app.post("/api/warp/host-setup", requireAuth, requireProTier, async (req, res) =
         String(e.message || e) ||
         "Не удалось выполнить по SSH. Проверьте пароль root, что вход root по паролю разрешён, переменную TIME_SYNC_SSH_HOST и наличие каталога со скриптом на хосте.",
     });
+  }
+});
+
+// ---------- Xray VLESS-Reality ----------
+// Layout matches the official Amnezia client (xray_*.key + clientsTable), so the app sees the same server.
+const XRAY_CONTAINER = "amnezia-xray";
+const XRAY_IMAGE = "amnezia-xray";
+const XRAY_DIR = "/opt/amnezia/xray";
+const XRAY_VERSION = "v26.3.27";
+const XRAY_DOCKERFILE = `FROM alpine:3.20
+RUN apk add --no-cache curl unzip bash openssl dumb-init && \\
+    curl -fsSL -o /root/xray.zip https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip && \\
+    unzip /root/xray.zip xray -d /usr/bin/ && chmod +x /usr/bin/xray && rm /root/xray.zip && mkdir -p ${XRAY_DIR}
+ENTRYPOINT ["dumb-init", "/usr/bin/xray", "-config", "${XRAY_DIR}/server.json"]
+`;
+
+function xrayExec(script) {
+  return dockerExecStdin(XRAY_CONTAINER, script);
+}
+function xrayShellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+async function xrayReadFile(name) {
+  try {
+    return (await xrayExec(`cat ${XRAY_DIR}/${name} 2>/dev/null`)).stdout;
+  } catch {
+    return "";
+  }
+}
+async function xrayWriteFile(name, text) {
+  await execDocker(["exec", "-i", XRAY_CONTAINER, "sh", "-c", `cat > ${XRAY_DIR}/${name}`], text);
+}
+function xrayInspect() {
+  const r = dockerSpawnSync(["inspect", "--format", "{{.State.Running}}", XRAY_CONTAINER], 15_000);
+  return { installed: r.code === 0, running: r.stdout.trim() === "true" };
+}
+async function xrayState() {
+  const server = JSON.parse((await xrayReadFile("server.json")) || "{}");
+  const ib = (server.inbounds || []).find((i) => i.protocol === "vless");
+  if (!ib) throw new Error("В server.json нет VLESS-входа.");
+  let table = [];
+  try {
+    table = JSON.parse((await xrayReadFile("clientsTable")) || "[]");
+  } catch {}
+  if (!Array.isArray(table)) table = [];
+  return {
+    server,
+    ib,
+    table,
+    pub: (await xrayReadFile("xray_public.key")).trim(),
+    shortId: (await xrayReadFile("xray_short_id.key")).trim() || ib.streamSettings?.realitySettings?.shortIds?.[0] || "",
+  };
+}
+async function xraySave(st) {
+  // Enabled = present in server.json; disabled clients live only in clientsTable.
+  st.ib.settings.clients = st.table
+    .filter((r) => !r.userData?.disabled)
+    .map((r) => ({ id: r.clientId, flow: "xtls-rprx-vision" }));
+  await xrayWriteFile("server.json", JSON.stringify(st.server, null, 2));
+  await xrayWriteFile("clientsTable", JSON.stringify(st.table, null, 2));
+  await execDocker(["restart", XRAY_CONTAINER]);
+}
+function xrayLink(st, row, host) {
+  const rs = st.ib.streamSettings.realitySettings;
+  const q = new URLSearchParams({
+    type: "tcp",
+    security: "reality",
+    pbk: st.pub,
+    fp: "chrome",
+    sni: rs.serverNames[0],
+    sid: st.shortId,
+    spx: "/",
+    flow: "xtls-rprx-vision",
+    encryption: "none",
+  });
+  const name = encodeURIComponent(row.userData?.clientName || "client");
+  return `vless://${row.clientId}@${host}:${st.ib.port}?${q}#${name}`;
+}
+function xrayHost(req) {
+  return configuredEndpointHost() || hostFromRequest(req) || "SERVER_IP";
+}
+
+app.get("/api/xray/status", requireAuth, async (req, res) => {
+  const s = xrayInspect();
+  if (!s.running) return res.json({ ...s, clients: [] });
+  try {
+    const st = await xrayState();
+    const host = xrayHost(req);
+    res.json({
+      ...s,
+      port: st.ib.port,
+      sni: st.ib.streamSettings?.realitySettings?.serverNames?.[0] || "",
+      clients: st.table.map((r) => ({
+        id: r.clientId,
+        name: r.userData?.clientName || r.clientId,
+        enabled: !r.userData?.disabled,
+        created: r.userData?.creationDate || "",
+        link: xrayLink(st, r, host),
+      })),
+    });
+  } catch (e) {
+    res.json({ ...s, clients: [], error: String(e.message || e) });
+  }
+});
+
+app.post("/api/xray/install", requireAuth, async (req, res) => {
+  const port = Number.parseInt(String(req.body?.port || "443"), 10);
+  const sni = String(req.body?.sni || "www.google.com").trim();
+  if (!(port > 0 && port < 65536)) return res.status(400).json({ error: "Неверный порт." });
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(sni)) return res.status(400).json({ error: "Неверный сайт-маскировка (SNI)." });
+  if (xrayInspect().installed) return res.status(409).json({ error: "Xray уже установлен. Сначала удалите его." });
+  const busy = dockerSpawnSync(["ps", "--format", "{{.Names}} {{.Ports}}"], 15_000).stdout
+    .split("\n")
+    .find((l) => new RegExp(`:${port}->\\d+/tcp`).test(l));
+  if (busy) return res.status(409).json({ error: `TCP-порт ${port} занят: ${busy.split(" ")[0]}` });
+  try {
+    await execDocker(["build", "-t", XRAY_IMAGE, "-"], XRAY_DOCKERFILE);
+    const kp = (await execDocker(["run", "--rm", "--entrypoint", "/usr/bin/xray", XRAY_IMAGE, "x25519"])).stdout;
+    const priv = (kp.match(/Private\s*key:\s*(\S+)/i) || kp.match(/PrivateKey:\s*(\S+)/i) || [])[1];
+    const pub = (kp.match(/(?:Public\s*key|Password)[^:\n]*:\s*(\S+)/i) || [])[1];
+    if (!priv || !pub) throw new Error(`Не удалось получить ключи x25519: ${kp}`);
+    const shortId = crypto.randomBytes(8).toString("hex");
+    const server = {
+      log: { loglevel: "error" },
+      inbounds: [
+        {
+          port,
+          protocol: "vless",
+          settings: { clients: [], decryption: "none" },
+          streamSettings: {
+            network: "tcp",
+            security: "reality",
+            realitySettings: { dest: `${sni}:443`, serverNames: [sni], privateKey: priv, shortIds: [shortId] },
+          },
+        },
+      ],
+      outbounds: [{ protocol: "freedom" }],
+    };
+    const files = {
+      "server.json": JSON.stringify(server, null, 2),
+      "xray_private.key": `${priv}\n`,
+      "xray_public.key": `${pub}\n`,
+      "xray_short_id.key": `${shortId}\n`,
+      "xray_uuid.key": "\n",
+      clientsTable: "[]",
+    };
+    const script = ["set -e", `mkdir -p /x`]
+      .concat(Object.entries(files).map(([n, t]) => `printf '%s' ${xrayShellQuote(t)} > /x/${n}`))
+      .join("\n");
+    await execDocker(["run", "--rm", "-i", "-v", `${XRAY_DIR}:/x`, "--entrypoint", "sh", XRAY_IMAGE, "-s"], script);
+    await execDocker([
+      "run", "-d", "--restart", "always", "--name", XRAY_CONTAINER,
+      "-p", `${port}:${port}/tcp`, "-v", `${XRAY_DIR}:${XRAY_DIR}`, XRAY_IMAGE,
+    ]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/xray/remove", requireAuth, async (_req, res) => {
+  dockerSpawnSync(["rm", "-f", XRAY_CONTAINER], 60_000);
+  // ponytail: keys and clientsTable stay in /opt/amnezia/xray on the host; a reinstall regenerates them.
+  res.json({ ok: true });
+});
+
+app.post("/api/xray/clients/create", requireAuth, async (req, res) => {
+  const name = String(req.body?.name || "").trim().slice(0, 64);
+  if (!name) return res.status(400).json({ error: "Укажите имя клиента." });
+  try {
+    const st = await xrayState();
+    const row = { clientId: crypto.randomUUID(), userData: { clientName: name, creationDate: new Date().toString() } };
+    st.table.push(row);
+    await xraySave(st);
+    res.json({ ok: true, link: xrayLink(st, row, xrayHost(req)) });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/xray/clients/update", requireAuth, async (req, res) => {
+  const id = String(req.body?.id || "");
+  const action = String(req.body?.action || "");
+  try {
+    const st = await xrayState();
+    const row = st.table.find((r) => r.clientId === id);
+    if (!row) return res.status(404).json({ error: "Клиент не найден." });
+    if (action === "delete") st.table = st.table.filter((r) => r !== row);
+    else if (action === "enable" || action === "disable") {
+      row.userData = { ...row.userData, disabled: action === "disable" };
+      if (!row.userData.disabled) delete row.userData.disabled;
+    } else return res.status(400).json({ error: "Неизвестное действие." });
+    await xraySave(st);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
   }
 });
 
@@ -2462,7 +2599,7 @@ app.get("/api/settings", requireAuth, (_req, res) => {
   });
 });
 
-app.post("/api/settings", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/settings", requireAuth, async (req, res) => {
   const raw = String(req.body?.endpointHost ?? "").trim();
   let host = "";
   if (raw) {
@@ -2491,9 +2628,7 @@ app.get("/api/protocols", requireAuth, (req, res) => {
   const rt = runtimeForRequest(req);
   const hintSingle =
     getProfiles().length < 2
-      ? IS_COMMUNITY
-        ? "Один инстанс в интерфейсе. Несколько контейнеров и профиль AWG_PROFILES — в полной панели PRO."
-        : "Сейчас один инстанс: при установке не передали AWG_PROFILES или не восстановился снимок. Задайте JSON профилей и запустите install.sh — он сохранится в /root/amnezia-admin.awg-profiles.json."
+      ? "Сейчас один инстанс: при установке не передали AWG_PROFILES или не восстановился снимок. Задайте JSON профилей и запустите install.sh — он сохранится в /root/amnezia-admin.awg-profiles.json."
       : "";
   res.json({
     currentId: rt.profile.id,
@@ -2505,7 +2640,6 @@ app.get("/api/protocols", requireAuth, (req, res) => {
     })),
     singleProfile: getProfiles().length < 2,
     profilesPersistHint: hintSingle,
-    edition: editionPayload(),
   });
 });
 
@@ -2615,16 +2749,15 @@ app.get("/api/clients", requireAuth, async (req, res) => {
       clients: rows,
       wgShow,
       warp: warpOut,
-      uiHidden: { ...effectiveUiHidden() },
-      edition: editionPayload(),
-    });
+      uiHidden: { ...UI_HIDDEN },
+      });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: String(e.message || e) });
   }
 });
 
-app.post("/api/clients/sync-peers", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/sync-peers", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   try {
     await rt.backupRemoteFiles();
@@ -2718,14 +2851,6 @@ app.get("/api/clients/source-report", requireAuth, async (req, res) => {
 });
 
 async function serveClientConfigExport(req, res) {
-  if (IS_COMMUNITY) {
-    res.status(403).json({
-      error: "Экспорт .conf доступен в версии PRO.",
-      upgradeRequired: true,
-      upgradeUrl: COMMUNITY_UPGRADE_URL,
-    });
-    return;
-  }
   const tokenOk =
     req.method === "GET" &&
     verifyExportQueryToken(typeof req.query.token === "string" ? req.query.token : "");
@@ -2805,7 +2930,7 @@ app.post("/api/clients/export-config", requireAuth, (req, res) => {
  * Новый клиент для каскада: генерирует ключи, добавляет peer на сервер, сохраняет last_config,
  * отдаёт .conf с Endpoint = endpointHost:endpointPort (ваш промежуточный узел).
  */
-app.post("/api/clients/create", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/create", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   try {
     await rt.backupRemoteFiles();
@@ -2898,7 +3023,7 @@ AllowedIPs = ${tunnelIp}/32
   }
 });
 
-app.post("/api/clients/create-cascade", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/create-cascade", requireAuth, async (req, res) => {
   if (UI_HIDDEN.cascade) {
     return res.status(403).json({ error: MSG_UI_CASCADE_OFF });
   }
@@ -3014,7 +3139,7 @@ AllowedIPs = ${tunnelIp}/32
   }
 });
 
-app.post("/api/clients/import-config", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/import-config", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   try {
     const raw = req.body?.configText ?? req.body?.backupText ?? req.body?.text ?? "";
@@ -3040,7 +3165,7 @@ app.post("/api/clients/import-config", requireAuth, requireProTier, async (req, 
   }
 });
 
-app.post("/api/warp/start", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/warp/start", requireAuth, async (req, res) => {
   if (UI_HIDDEN.warp) {
     return res.status(403).json({ error: MSG_UI_WARP_OFF });
   }
@@ -3061,7 +3186,7 @@ app.post("/api/warp/start", requireAuth, requireProTier, async (req, res) => {
   }
 });
 
-app.post("/api/cascade/upstream", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/cascade/upstream", requireAuth, async (req, res) => {
   if (UI_HIDDEN.warp || UI_HIDDEN.cascade) {
     return res.status(403).json({ error: MSG_UI_CASCADE_OFF });
   }
@@ -3086,7 +3211,7 @@ app.post("/api/cascade/upstream", requireAuth, requireProTier, async (req, res) 
   }
 });
 
-app.post("/api/warp/stop", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/warp/stop", requireAuth, async (req, res) => {
   if (UI_HIDDEN.warp) {
     return res.status(403).json({ error: MSG_UI_WARP_OFF });
   }
@@ -3103,7 +3228,7 @@ app.post("/api/warp/stop", requireAuth, requireProTier, async (req, res) => {
   }
 });
 
-app.post("/api/warp/routing", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/warp/routing", requireAuth, async (req, res) => {
   if (UI_HIDDEN.warp) {
     return res.status(403).json({ error: MSG_UI_WARP_OFF });
   }
@@ -3142,7 +3267,7 @@ app.post("/api/warp/routing", requireAuth, requireProTier, async (req, res) => {
   }
 });
 
-app.post("/api/clients/disable", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/disable", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   const clientId = req.body?.clientId;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
@@ -3165,7 +3290,7 @@ app.post("/api/clients/disable", requireAuth, requireProTier, async (req, res) =
   }
 });
 
-app.post("/api/clients/enable", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/enable", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   const clientId = req.body?.clientId;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
@@ -3215,7 +3340,7 @@ AllowedIPs = ${ips}`;
   }
 });
 
-app.post("/api/clients/disconnect-date", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/disconnect-date", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   const clientId = req.body?.clientId;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
@@ -3259,7 +3384,7 @@ app.post("/api/clients/disconnect-date", requireAuth, requireProTier, async (req
   }
 });
 
-app.post("/api/clients/rename", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/rename", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   const clientId = req.body?.clientId;
   const rawName = req.body?.name ?? req.body?.clientName;
@@ -3291,7 +3416,7 @@ app.post("/api/clients/rename", requireAuth, requireProTier, async (req, res) =>
   }
 });
 
-app.post("/api/clients/delete", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/clients/delete", requireAuth, async (req, res) => {
   const rt = runtimeFromExportRequest(req);
   const clientId = req.body?.clientId;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
@@ -3407,7 +3532,7 @@ app.get("/api/instances", requireAuth, async (_req, res) => {
   res.json({ instances: items, variants: INSTANCE_VARIANTS });
 });
 
-app.post("/api/instances/create", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/instances/create", requireAuth, async (req, res) => {
   const variant = String(req.body?.variant || "").trim();
   const port = Number(req.body?.port);
   if (!INSTANCE_VARIANTS[variant]) return res.status(400).json({ error: "Неизвестный вариант протокола." });
@@ -3437,7 +3562,7 @@ app.post("/api/instances/create", requireAuth, requireProTier, async (req, res) 
   }
 });
 
-app.post("/api/instances/delete", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/instances/delete", requireAuth, async (req, res) => {
   const id = String(req.body?.id || "").trim();
   const list = loadManagedProfiles();
   const found = list.find((p) => p.id === id);
@@ -3458,7 +3583,7 @@ async function resolveProfileContainer(id) {
   catch { return prof.container || null; }
 }
 
-app.post("/api/instances/stop", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/instances/stop", requireAuth, async (req, res) => {
   const id = String(req.body?.id || "").trim();
   const container = await resolveProfileContainer(id);
   if (!container) return res.status(404).json({ error: "Инстанс не найден." });
@@ -3466,7 +3591,7 @@ app.post("/api/instances/stop", requireAuth, requireProTier, async (req, res) =>
   catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 
-app.post("/api/instances/start", requireAuth, requireProTier, async (req, res) => {
+app.post("/api/instances/start", requireAuth, async (req, res) => {
   const id = String(req.body?.id || "").trim();
   const container = await resolveProfileContainer(id);
   if (!container) return res.status(404).json({ error: "Инстанс не найден." });
@@ -3493,13 +3618,9 @@ app.listen(PORT, "0.0.0.0", () => {
 });
 
 setInterval(() => {
-  if (!IS_COMMUNITY) {
-    processAllScheduledDisconnects().catch((e) => console.error("scheduleDisconnect:", e));
-  }
+  processAllScheduledDisconnects().catch((e) => console.error("scheduleDisconnect:", e));
 }, SCHEDULER_MS);
 
 setTimeout(() => {
-  if (!IS_COMMUNITY) {
-    processAllScheduledDisconnects().catch((e) => console.error("scheduleDisconnect:", e));
-  }
+  processAllScheduledDisconnects().catch((e) => console.error("scheduleDisconnect:", e));
 }, 4000);
