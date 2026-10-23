@@ -9,14 +9,19 @@
 **Установка** (Ubuntu 22.04/24.04, Debian 12, под root; Docker поставится сам):
 
 ```bash
+# основной адрес
 curl -fsSL https://git.bobyrev.com/PCA/amnezia_web-PRO/raw/branch/main/scripts/install.sh | sudo bash
+# запасной — GitHub (если основной недоступен)
+curl -fsSL https://raw.githubusercontent.com/andrey271192/amnezia_web-PRO/main/scripts/install.sh | sudo bash
 ```
 
-Панель: `http://IP:8080`, вход — пароль `admin` (смените сразу). Код — [git.bobyrev.com/PCA/amnezia_web-PRO](https://git.bobyrev.com/PCA/amnezia_web-PRO) (GitHub-аккаунт заблокирован, старые ссылки raw.githubusercontent.com больше не работают).
+Установщик сам качает код с того источника, который отвечает: сначала git.bobyrev.com, потом GitHub.
+
+Панель: `http://IP:8080`, вход — пароль `admin` (смените сразу). Код и выпуски: [git.bobyrev.com/PCA/amnezia_web-PRO](https://git.bobyrev.com/PCA/amnezia_web-PRO) · [выпуски](https://git.bobyrev.com/PCA/amnezia_web-PRO/releases) · копия на [GitHub](https://github.com/andrey271192/amnezia_web-PRO).
 
 ## Что нового в 1.4.2
 
-- **Проект переехал на [git.bobyrev.com/PCA/amnezia_web-PRO](https://git.bobyrev.com/PCA/amnezia_web-PRO)** — GitHub-аккаунт заблокирован. Установщик и обновление качают код оттуда. Старая команда с `raw.githubusercontent.com` больше не работает — используйте новую (выше).
+- **Проект переехал на [git.bobyrev.com/PCA/amnezia_web-PRO](https://git.bobyrev.com/PCA/amnezia_web-PRO)** — GitHub-аккаунт заблокирован. Установщик берёт код с того из двух источников (git.bobyrev.com или GitHub), что отвечает.
 
 ## Что нового в 1.4.0
 

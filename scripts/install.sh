@@ -2,7 +2,8 @@
 # Установка Amnezia Admin WebUI одной командой (см. README).
 set -euo pipefail
 
-GITHUB_REPO="${GITHUB_REPO:-PCA/amnezia_web-PRO}"
+GITHUB_REPO="${GITHUB_REPO:-andrey271192/amnezia_web-PRO}"
+GITEA_REPO="${GITEA_REPO:-PCA/amnezia_web-PRO}"
 GIT_BASE="${GIT_BASE:-https://git.bobyrev.com}"
 BRANCH="${BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/amnezia-admin}"
@@ -75,18 +76,32 @@ if [[ "${SKIP_DOWNLOAD:-}" != "1" ]]; then
     -H 'Pragma: no-cache'
     --connect-timeout "${CURL_CONNECT_TIMEOUT:-15}"
     --max-time "${CURL_MAX_TIME:-900}"
-    --retry "${CURL_RETRY:-2}"
+    --retry "${CURL_RETRY:-1}"
     --retry-delay "${CURL_RETRY_DELAY:-5}"
     --retry-connrefused
   )
   if [[ "${INSTALL_SCRIPT_VERBOSE:-}" == "1" ]]; then CURL_OPTS+=(--progress-bar); fi
-  # ponytail: GitHub-аккаунт заблокирован (10.2026), код живёт на git.bobyrev.com.
-  CURL_URL="${GITHUB_REPO_URL_OVERRIDE:-${GIT_BASE}/${GITHUB_REPO}/archive/${BRANCH}.tar.gz}"
-  if ! curl "${CURL_OPTS[@]}" "${CURL_URL}" | tar xz -C "${TMP}"; then
-    echo "Ошибка: не удалось скачать или распаковать архив (${CURL_URL})."
-    echo "Подсказка: проверьте доступ к git.bobyrev.com, при необходимости export GITHUB_REPO_URL_OVERRIDE='…' или INSTALL_SCRIPT_VERBOSE=1."
+  # Два источника одного кода: Gitea (git.bobyrev.com) и GitHub — берём первый, что ответил.
+  if [[ -n "${GITHUB_REPO_URL_OVERRIDE:-}" ]]; then
+    SOURCES=("${GITHUB_REPO_URL_OVERRIDE}")
+  else
+    SOURCES=("${GIT_BASE}/${GITEA_REPO}/archive/${BRANCH}.tar.gz"
+             "https://github.com/${GITHUB_REPO}/archive/refs/heads/${BRANCH}.tar.gz")
+  fi
+  __ok=""
+  for CURL_URL in "${SOURCES[@]}"; do
+    rm -rf "${TMP:?}"/*
+    if curl "${CURL_OPTS[@]}" -o "${TMP}/src.tgz" "${CURL_URL}" 2>/dev/null && tar xzf "${TMP}/src.tgz" -C "${TMP}" 2>/dev/null; then
+      rm -f "${TMP}/src.tgz"; __ok=1; break
+    fi
+    echo "→ ${CURL_URL} недоступен, пробую следующий источник…"
+  done
+  if [[ -z "${__ok}" ]]; then
+    echo "Ошибка: не удалось скачать код ни с одного источника: ${SOURCES[*]}"
+    echo "Подсказка: проверьте доступ к git.bobyrev.com и github.com, при необходимости export GITHUB_REPO_URL_OVERRIDE='…'."
     exit 1
   fi
+  echo "→ Код взят с ${CURL_URL}"
   echo "→ Перенос распакованного дерева в ${INSTALL_DIR}…"
   # API-tarball распаковывается в каталог вида `<owner>-<repo>-<sha7>`,
   # archive/refs/heads — в `<repo>-<branch>`. Поэтому берём первый каталог TMP.
@@ -354,4 +369,4 @@ if [[ -f "${PASS_FILE}" ]]; then
   echo "Первый пароль: $(cat "${PASS_FILE}")"
 fi
 echo ""
-echo "Удаление: curl -fsSL ${GIT_BASE}/${GITHUB_REPO}/raw/branch/${BRANCH}/scripts/uninstall.sh | sudo bash"
+echo "Удаление: curl -fsSL ${GIT_BASE}/${GITEA_REPO}/raw/branch/${BRANCH}/scripts/uninstall.sh | sudo bash"
