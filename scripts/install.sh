@@ -2,7 +2,8 @@
 # Установка Amnezia Admin WebUI одной командой (см. README).
 set -euo pipefail
 
-GITHUB_REPO="${GITHUB_REPO:-andrey271192/amnezia_web-PRO}"
+GITHUB_REPO="${GITHUB_REPO:-PCA/amnezia_web-PRO}"
+GIT_BASE="${GIT_BASE:-https://git.bobyrev.com}"
 BRANCH="${BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/amnezia-admin}"
 DATA_DIR="${DATA_DIR:-/opt/amnezia-admin-data}"
@@ -66,26 +67,24 @@ fi
 
 if [[ "${SKIP_DOWNLOAD:-}" != "1" ]]; then
   echo "→ Клонирование релиза ${GITHUB_REPO} (${BRANCH})..."
-  echo "→ Скачивание tar.gz с GitHub (вывода может не быть 1–10 мин.; при блокировках задайте зеркало GITHUB_REPO_URL_OVERRIDE или см. CURL_MAX_TIME ниже)."
+  echo "→ Скачивание tar.gz с ${GIT_BASE} (вывода может не быть 1–10 мин.; при блокировках задайте зеркало GITHUB_REPO_URL_OVERRIDE или см. CURL_MAX_TIME ниже)."
   TMP=$(mktemp -d)
   CURL_OPTS=(
     -fsSL
     -H 'Cache-Control: no-cache'
     -H 'Pragma: no-cache'
-    --connect-timeout "${CURL_CONNECT_TIMEOUT:-30}"
+    --connect-timeout "${CURL_CONNECT_TIMEOUT:-15}"
     --max-time "${CURL_MAX_TIME:-900}"
     --retry "${CURL_RETRY:-2}"
     --retry-delay "${CURL_RETRY_DELAY:-5}"
     --retry-connrefused
   )
   if [[ "${INSTALL_SCRIPT_VERBOSE:-}" == "1" ]]; then CURL_OPTS+=(--progress-bar); fi
-  CURL_URL="${GITHUB_REPO_URL_OVERRIDE:-}"
-  if [[ -z "${CURL_URL}" ]]; then
-    CURL_URL="https://github.com/${GITHUB_REPO}/archive/refs/heads/${BRANCH}.tar.gz"
-  fi
+  # ponytail: GitHub-аккаунт заблокирован (10.2026), код живёт на git.bobyrev.com.
+  CURL_URL="${GITHUB_REPO_URL_OVERRIDE:-${GIT_BASE}/${GITHUB_REPO}/archive/${BRANCH}.tar.gz}"
   if ! curl "${CURL_OPTS[@]}" "${CURL_URL}" | tar xz -C "${TMP}"; then
     echo "Ошибка: не удалось скачать или распаковать архив (${CURL_URL})."
-    echo "Подсказка: проверьте доступ к github.com, branch/repo, при необходимости export GITHUB_REPO_URL_OVERRIDE='…' или INSTALL_SCRIPT_VERBOSE=1."
+    echo "Подсказка: проверьте доступ к git.bobyrev.com, при необходимости export GITHUB_REPO_URL_OVERRIDE='…' или INSTALL_SCRIPT_VERBOSE=1."
     exit 1
   fi
   echo "→ Перенос распакованного дерева в ${INSTALL_DIR}…"
@@ -355,4 +354,4 @@ if [[ -f "${PASS_FILE}" ]]; then
   echo "Первый пароль: $(cat "${PASS_FILE}")"
 fi
 echo ""
-echo "Удаление: curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/scripts/uninstall.sh | sudo bash"
+echo "Удаление: curl -fsSL ${GIT_BASE}/${GITHUB_REPO}/raw/branch/${BRANCH}/scripts/uninstall.sh | sudo bash"

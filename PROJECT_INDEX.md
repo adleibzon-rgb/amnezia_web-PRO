@@ -9,7 +9,7 @@
 |---|---|
 | Папка проекта | `/Volumes/ssd/Мои проекты/Открытые проекты/amnezia_web-PRO/` |
 | Заметки | Apple Notes → `МОИ ПРОЕКТЫ` → папка `amnezia_web-PRO` |
-| GitHub (публичный) | https://github.com/andrey271192/amnezia_web-PRO |
+| GitHub (публичный) | https://git.bobyrev.com/PCA/amnezia_web-PRO |
 | Ветка прода | `main` |
 | Старая закрытая панель (архив, не развивается) | `/Volumes/ssd/Мои проекты/Архив/amnezia_web-PRO_test/` |
 
@@ -39,7 +39,7 @@
 ## Установка
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/andrey271192/amnezia_web-PRO/main/scripts/install.sh | sudo bash
+curl -fsSL https://git.bobyrev.com/PCA/amnezia_web-PRO/raw/branch/main/scripts/install.sh | sudo bash
 ```
 
 Первый вход: `admin` / `admin`, пароль сменить сразу.

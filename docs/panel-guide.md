@@ -22,7 +22,7 @@
    ```
 2. Если строки нет, но `docker ps` показывает два контейнера вида `amnezia-awg*`, переустановите панель свежим установщиком из GitHub:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/andrey271192/amnezia_web-PRO/main/scripts/install.sh | sudo env SKIP_LANDING=1 bash
+   curl -fsSL https://git.bobyrev.com/PCA/amnezia_web-PRO/raw/branch/main/scripts/install.sh | sudo env SKIP_LANDING=1 bash
    ```
    Установщик сам создаст **`AWG_PROFILES`** и сохранит **`/root/amnezia-admin.awg-profiles.json`**.
 3. Ручной JSON нужен только при нестандартных путях внутри AWG-контейнеров.
