@@ -4,6 +4,8 @@
 
 <img src="docs/screenshots/panel-1.4.png" alt="Панель amnezia_web-PRO 1.4: пользователи AmneziaWG, Xray VLESS-Reality, протоколы и инстансы" width="780"/>
 
+<img src="docs/screenshots/panel-protocols.png" alt="Установка AmneziaWG 3.1/3.0/2.0/1.x и WireGuard прямо из панели с выбором порта" width="780"/>
+
 **Что умеет:** клиенты AmneziaWG (создать, выключить, дата отключения, .conf), установка протоколов из браузера (AmneziaWG 1.x/2.0/3.0/3.1, WireGuard), Xray VLESS‑Reality, Cloudflare WARP и каскад через другой сервер, Telegram MTProto‑прокси, домен сервера в конфигах, светлая/тёмная тема.
 
 **Установка** (Ubuntu 22.04/24.04, Debian 12, под root; Docker поставится сам):
